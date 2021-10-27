@@ -1,0 +1,396 @@
+#!/usr/bin/python
+#Author Manhong Dai, MNI, U of Michigan
+#20211027 MAJOR upgrade with python class and github release
+#20210907 60-bay
+#20210823 -l +/-
+#20210821 -l +/-
+#20210802 grep -vw ok/ns
+#20210719 ipmitool
+#20210603 move -c to the second position
+#20210311 removed --ignore, add --files
+#20210310 md5sum authorized_keys
+#20210106, storcli DHS D/U/T
+#20201025 --time 15 -> 20
+#20200826 60-bay fix
+#20200612 re-enabeld --gluster
+#20200609 move lvdisplay to the last command to make sure it has '(o)pen', IP
+#20200605 ssh banner
+#20200303 uptime
+#20200219 CVPM0 OK$
+#20191010 used >= nthr[0] -> used > nthr[0]
+#20190904 CVPM0
+#20190712 -L
+#20190710 CVPM02
+#20190619 uname, MEMINFO->SYSINFO
+#20190418 ls before df, because autofs show dash as fielsystem if it is unmounted due to timeout
+#20190208 retire drbd-overview
+#20190116 ignore-line
+#20190112 DRIVE Onln
+#20190109, no append in args for better consistency, bash -c in commands
+#20190108, "#" in output
+#20190104, fix temperature
+#20181207, storcli GHS D/U/T
+#20181114, generate 60-bay layout
+#20181113, T -
+#20181011, drbd not found
+#20181010, ignore in decode
+#20181009, 2>&1 in drbdoverview
+#20181003, 2>&1 in commands
+#20180921, re-enabled megacli
+#20180919, -T
+#20180622, removed gluster, 'type=int'
+#20180613, storcli GHS D/U
+#20180607, storcli GHS D/U
+#20180604, storcli modification
+#20180515, 'RAID:STORCLI:\tActive Operations = Consistency Check'
+#20180510, storcli iBBU
+#20180509, storcli and tmpfs
+#20180418, re.sub
+#20180417, Python 3
+#20180413, drbd-overview
+#20180409, TMPFS, storcli
+#Jan 22, 2018, df missing mountpoint
+#Aug 23, 2017, dfcheck, add SIZE-THRESHOLD and filesystem
+#Aug 07, 2017, umount /home; mount /home
+#Mar 14, 2017, Local Time in smartctl
+#Feb 06, 2017, mintor
+#Dec 23, 2016, -m
+#Nov 2, 2016, modified -d to handle automount, remove -l
+#Jun 20, 2016, unexpected output caused by 0.0.21
+#Jun 14, 2016, ssh stderr
+#Mar 22, 2016, DF printing
+#Feb 29, 2016, 100% df is fine
+#Jul 20, 2015, errexit instead of exception
+#Apr 20, 2015, default offset for time to 15
+#Jan 26, 2015, offset for time
+#Jan 12, 2015, time
+#Jun 20, 2014, minor change for areca temporature
+#Jun 20, 2014, add areca temporature
+#May 23, 2014, added lvdisplay
+#Mar 12, 2014, 'RAID:LSI:	  Check Consistency        : Running'
+#Feb 24, 2014, raise exception if ssh failed
+#Sep 13, 2013, LSI supports drive that has no temperature reading now
+#Aug 29, 2013, "-r drbd", "-c"
+#Aug 8, 2013, "disk info in areca"
+#Jul 19, 2013, "-r areca:N"
+#Jul 9, 2013, added '-p' to ssh to different port
+#Jul 3, 2013, Temperature in LSI; added '-n' to 'ssh'
+#Jun 3, 2013, add '-f /proc/mdstat'
+#Jan 21, 2013, add '-r' to check hardware raid
+#Sep 9, 2012, MDSTAT:	      [================>....]  check = 84.5% (2477136384/2930266432) finish=86.8min speed=87000K/sec
+#Sep 1, 2012, replace dm_storage with dm_linux
+import sys, subprocess, argparse, time, re
+def err_exit(msg):
+	print(msg, file=sys.stderr)
+	exit(1)
+
+class Task():
+	option = None
+
+class DfCheck(Task):
+	option = 'd'
+	helpmsg = 'A list of mountpoints and threshold'
+	metavar = "MOUNTPOINTS:PCT-THRESHOLD(:SIZE-THRESHOLD-IN-GB)"
+	def __init__(self, prefix, param):
+		fs = param.split(':')
+		self.check = [int(s) for s in fs[1:]]
+		self.cmds = []
+		if prefix.endswith(':0'): self.cmds.append(f'echo -e "{prefix}:\t"BEGIN')
+		for mp in fs[0].split(','):
+			if mp == 'TMPFS':
+				self.cmds.append(f'df -Pt tmpfs |tail -n +2 | grep -v /run/user/ | sed -e "s/^/{prefix}:\t/"')
+			else:
+				self.cmds.append(f'mountpoint {mp} &> /dev/null && df -P {mp} | tail -n +2 | sed -e "s/^/{prefix}:\t/"')
+	def println(self, prefix, ln):
+		if ln == 'BEGIN':
+			print(f'DFCHECK:\tSize\tAvail\tUsed%\tThreshold%\tMounted on\tFilesystem')
+			return
+		fs = ln.split()
+		size = int(fs[1])/1048576
+		used = int(fs[4][:-1])
+		avail = int(fs[3])/1048576
+		if used >= self.check[0] or (len(self.check) == 2 and size < self.check[1]):
+			print('%s:\t%dG\t%dG\t%d%%\t%d%%\t%s\t%s' % (prefix, size, avail, used, self.check[0], fs[5], fs[0]))
+		elif len(self.check) == 1:
+			print('%s:\t%dG\tOK\t\t\t%s\t%s' % (prefix, size, fs[5], fs[0]))
+		elif len(self.check) == 2:
+			print('%s:\tOK\tOK\t\t\t%s\t%s' % (prefix, fs[5], fs[0]))
+		else:
+			err_exit('ERR-107: %s' % ln)
+
+class SmartCheck(Task):
+	option = 's'
+	helpmsg = 'A list of drives, smart status of which will be checked. IGNORE_KEYWORDS in smartctl output will be skipped, "Local Time" is always ignred. Both DRIVES and KEYWORDS is comma separated'
+	metavar = 'DRIVES:IGNORE_KEYWORDS'
+	def __init__(self, prefix, param):
+		fs = param.split(':')
+		self.check = ['Local Time is']
+		if len(fs) > 1: self.check += fs[1].split(',')
+		self.check = list(set(self.check))
+		self.cmds = []
+		for drv in fs[0].split(','):
+			self.cmds.append(f'smartctl -iH /dev/{drv} | tail -n +4 | sed -e "s/^/{prefix}:\t{drv}:\t/"')
+	def println(self, prefix, ln):
+		for key in self.check:
+			if ln[ln.index(':\t')+2:].startswith(f'{key}:'): return
+		print(f'{prefix}:\t{ln}')
+
+class Dmesg(Task):
+	option = 'm'
+	helpmsg = 'Search a list of KEYWORDS in dmesg output'
+	metavar = 'KEYWORDS'
+	def __init__(self, prefix, param):
+		return [f'dmesg | grep -E "{param}" | sed -e "s/^/{prefix}:\t/"']
+
+class LoadCheck(Task):
+	option = 'l'
+	helpmsg ='Print uptime if any of the three load average is greater than +F or less than -F. If it is specified multiple times and any of them is satisifed, it will print uptime'
+	metavar = '±THRESHOLD'
+	def __init__(self, prefix, param):
+		self.check = float(param)
+		self.cmds = [f'uptime | sed -e "s/^/{prefix}:\t/"']
+	def println(self, prefix, ln):
+		loads = [float(s) for s in ln.split('load average: ')[1].split(', ')]
+		if self.check >= 0:
+			if max(loads) >= self.check:
+				print(f'{prefix}:\t+{self.check}')
+		elif min(loads) <= -self.check:
+				print(f'{prefix}:\t{self.check}')
+
+class Command(Task):
+	option = 'c'
+	helpmsg ='commands to be run on the target'
+	metavar = 'COMMAND'
+	def __init__(self, prefix, param):
+		self.cmds = [f'{param} | sed -e "s/^/{prefix}:\t/"' ]
+	def println(self, prefix, ln):
+		print(f'{prefix}:\t{ln}')
+
+class Temperature(Task):
+	option = 't'
+	helpmsg ="Threshold of the hottest read in sensors output"
+	metavar = 'TEMPERATURE'
+	def __init__(self, prefix, param):
+		self.check = int(param)
+		self.cmds = [f"sensors | sed -e 's/^/{prefix}:\t/'"]
+	def println(self, prefix, ln):
+		search = re.compile('\+[0-9]+\.[0-9]').search(ln)
+		if search is None: return
+		if int(float(search.group(0)[1:])) <= self.check: return
+		print(f'{prefix}:\t{ln}')
+
+class Stat(Task):
+	helpmsg = "stat permission and owner of FILES"
+	metavar = 'FILES'
+	def __init__(self, prefix, param):
+		self.cmds = []
+		for fl in param.split(','):
+			self.cmds.append(f"stat -c '%A\t%i\t%U\t%G\t%n' {fl} | sed -e 's/^/{prefix}:\t/'")
+	def println(self, prefix, ln):
+		print(f'{prefix}:\t{ln}')
+
+class Md5sum(Task):
+	helpmsg = "md5sum of FILES"
+	metavar = 'FILES'
+	FILES = ['.ssh/authorized_keys,/etc/passwd,/etc/ssh/sshd_config']
+	def __init__(self, prefix, param):
+		self.cmds = []
+		for fl in param.split(','):
+			self.cmds.append(f"md5sum {fl} | sed -e 's/^/{prefix}:\t/'")
+	def println(self, prefix, ln):
+		print(f'{prefix}:\t{ln}')
+
+class TimeOffset(Task):
+	helpmsg = "allowed time offset in seconds"
+	metavar = 'SECONDS'
+	def __init__(self, prefix, param):
+		self.now = int(time.time())
+		self.check = int(param)
+		self.cmds = [f'date +%s | sed -e "s/^/{prefix}:\t/"']
+	def println(self, prefix, ln):
+		diff = int(ln) - self.now
+		if diff < self.check: return
+		print(f'{prefix}:\t{diff}')
+
+class Sysinfo(Task):
+	def __init__(self, prefix, param):
+		self.cmds = [
+			f'(uname -a; head -n 1 /proc/meminfo) | sed -e "s/^/{prefix}:\t/"',
+			f'[ -f /proc/mdstat ] && cat /proc/mdstat | sed -e "s/^/{prefix}:\tMDSTAT:\t/"',
+			f'[ -f /proc/drbd ] && grep " cs:" /proc/drbd | sed -e "s/^/{prefix}:\tDRBD:\t/"',
+			f'ip a | grep -v valid_lft | sed -e "s/^/{prefix}:\tIP:\t/"',
+			f'which ipmitool &>/dev/null && ipmitool sdr 2>&1 | cut -d "|" -f 1,3 |grep -vEw "ok$|ns$" | sed -e "s/^/{prefix}:\tIPMITOOL:\t/" ',
+			f'which lvdisplay &> /dev/null && lvdisplay -C 2>&1 | sed -e "s/^/{prefix}:\tLVDISPLAY:\t/"',
+		]
+	def println(self, prefix, ln):
+		if ln.startswith('MDSTAT:\t      bitmap:'):
+			return
+		print(f'{prefix}:\t{ln}')
+
+class Areca(Task):
+	helpmsg = "areca cli64 output"
+	metavar = 'TEMPERATURE or TEMPERATURE:60-bay'
+	def __init__(self, prefix, param):
+		fs = param.split(':')
+		if len(fs) != 2 or fs[0][-1] != 'C':
+			err_exit('ERR-106: areca should be followed by a temperature alert threshold and number of cards, such as "--areca 50C:2"')
+		self.temperature = int(fs[0][:-1])
+		cli64 = '%s\nquit' % '\n'.join(['set curctrl=%d\nhw info\nvsf info\ndisk info' % (idx+1) for idx in range(int(fs[1]))])
+		self.cmds = [f'echo -e "{cli64}" | cli64 |col -b | sed -e "s/^/{prefix}:\t/"']
+		self.printit = True
+	def println(self, prefix, ln):
+		if "Ctrl Temperature" in ln or "Controller Temp." in ln:
+			idx = ln.rindex(': ') + 2
+			if int(ln[idx:ln.index(' ', idx)]) >= self.temperature:
+				print(f'{prefix}:\t{ln}')
+		elif ln.startswith('[Controller H/W Monitor]'):
+			self.printit = False
+		elif ln.startswith('CLI>'):
+			print(f'{prefix}:\t{ln}')
+			self.printit = True
+		elif self.printit:
+			print(f'{prefix}:\t{ln}')
+
+class Megacli(Task):
+	helpmsg = "megacli output"
+	metavar = 'TEMPERATURE'
+	def __init__(self, prefix, param):
+		if param[-1] != 'C': err_exit('ERR-105: --megacli needs a temperature alert threshold endswith "C", such as "--megacli 50C"')
+		self.temperature = int(param[:-1])
+		self.cmds = [
+			f'/opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL | sed -e "s/^/{prefix}:\t/"',
+		]
+	def println(self, prefix, ln):
+		if not ln.startswith('Drive Temperature :') or int(ln[19:ln.index('C', 19)]) >= self.temperature:
+			print(f'{prefix}:\t{ln}')
+
+class Storcli(Task):
+	helpmsg = "storcli output"
+	metavar = 'TEMPERATURE or TEMPERATURE:60-bay'
+	def __init__(self, prefix, param):
+		self.hdds = []
+		self.formfactor = None
+		fs = param.split(':')
+		if fs[0][-1] != 'C': err_exit('ERR-104: --storcli needs a temperature alert threshold endswith "C", optionally followed by a form factor, such as "60-bay", such as "--storcli 50C", or "--storcli 50C:60-bay"')
+		self.temperature = int(fs[0][:-1])
+		self.formfactor = fs[1] if len(fs) > 1 else None
+		self.cmds = [
+			f'/opt/MegaRAID/storcli/storcli /call show all| grep -iv "Date/Time" | sed -e "s/^/{prefix}:\t/"',
+			f'/opt/MegaRAID/storcli/storcli /call /eall /sall show all | sed -e "s/^/{prefix}:\t/"'
+		]
+	def __del__(self):
+		re_slot = re.compile('Drive /c([0-9]+)/e([0-9]+)/s([0-9]+) Device attributes :')
+		sns_each_card_enc = {}
+		for hd in self.hdds:
+			if len(hd) != 3: raise Exception('ERR-103')
+			mt = re_slot.match(hd[0])
+			if mt is None: raise Exception('ERR-102')
+			s_card, s_enc, s_slot = int(mt.group(1)), int(mt.group(2)), int(mt.group(3))
+			s_sn = hd[1].split(' = ')[1].strip()
+			s_sz = hd[2].split(' = ')[1]
+			s_sz = s_sz[:s_sz.index(' [')]
+			sns_each_card_enc.setdefault(f'/c{s_card}/e{s_enc}', {})[s_slot] = (s_sn, s_sz)
+		for card_enc, slot_sns in sns_each_card_enc.items():
+			for sn in sorted(slot_sns.items()):
+				print(f'{card_enc}/s{sn[0]}', sn[1][0], sn[1][1], sep='\t')
+		if self.formfactor == '60-bay':
+			for card_enc, slot_sns in sns_each_card_enc.items():
+				print(f'#{card_enc}, ▲: Left/Right, ▼: Right/Left, ◄: Front/Back, ►: Back/Front')
+				if len(slot_sns) != 20:
+					print('no 20 drives')
+					continue
+				slot_sns = [sn[0] for sl, sn in sorted(slot_sns.items())]
+				for row in range(5):
+					print('\t'.join([slot_sns[col*5 + row] for col in (range(4)) if col*5 + row < len(slot_sns)]))
+	def println(self, prefix, ln):
+		if ln.startswith('RAID:STORCLI:	iBBU'):
+			pass
+		elif ln.startswith('RAID:STORCLI:\tNext Patrol Read launch = '):
+			pass
+		elif ln.startswith('RAID:STORCLI:\tNext Consistency check launch = '):
+			pass
+		elif ln.startswith('RAID:STORCLI:\tNext Battery Learn = '):
+			pass
+		elif ln.startswith('ROC temperature(Degree Celsius) = '):
+			pass
+		elif ln.startswith('Drive Temperature ='):
+			if 'N/A' in ln or 'C' not in ln:
+				print(f'{prefix}:\t{ln}')
+			elif int(ln.split('=')[1].split('C')[0]) >= self.temperature:
+				print(f'{prefix}:\t{ln}')
+		elif ln.startswith('CVPM0'):
+			search = re.compile(' [0-9]+C ').search(ln)
+			if search is not None:
+				tmp  = int(search.group(0)[1:-2])
+				if tmp <= self.temperature: ln = ln.replace(search.group(0), ' OK ')
+				if tmp <= self.temperature: ln = ln[:search.span()[0]] + ' OK'
+			print(f'{prefix}:\t{ln}')
+#		elif (' DHS ' in ln or ' GHS ' in ln) and (ln.endswith(' D  -') or ln.endswith(' T  -') or ln.endswith('U  -')):
+#				print(ln[:-5], ' #  #', sep='')
+#		elif (' DHS ' in ln or ' GHS ' in ln) and (ln.endswith(' D') or ln.endswith(' T') or ln.endswith(' U')):
+#				print(ln[:-2], ' #', sep='')
+#		elif ' DRIVE  Onln  Y ' in ln or ' DRIVE  Onln  N ' in ln:
+#			replace_with = ' DRIVE  Onln  # '
+#			print(ln.replace(' DRIVE  Onln  Y ', replace_with).replace(' DRIVE  Onln  N ', replace_with))
+#		elif ' DRIVE Onln  Y ' in ln or ' DRIVE Onln  N ' in ln:
+#			replace_with = ' DRIVE Onln  # '
+#			print(ln.replace(' DRIVE Onln  Y ', replace_with).replace(' DRIVE Onln  N ', replace_with))
+#		elif ' Optl  Y ' in ln or ' Optl  N ' in ln:
+#			replace_with = ' Optl  # '
+#			print(ln.replace(' Optl  Y ', replace_with).replace(' Optl  N ', replace_with))
+		else:
+			print(f'{prefix}:\t{ln}')
+			if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
+				self.hdds.append([ln])
+			elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
+				self.hdds[-1].append(ln)
+def get_args():
+	parser = argparse.ArgumentParser()
+	parser.add_argument("host", help="host", metavar="HOST")
+	parser.add_argument("-p", "--port", type=int, help="Port number of the linux target", metavar="PORT", default=22)
+	for cls in Task.__subclasses__():
+		if cls.__name__.lower() == 'sysinfo': continue
+		if cls.option:
+			parser.add_argument(f"-{cls.option}", f"--{cls.__name__.lower()}", help=cls.helpmsg, metavar=cls.metavar, action='append')
+		else:
+			parser.add_argument(f"--{cls.__name__.lower()}", help=cls.helpmsg, metavar=cls.metavar, action='append')
+#	parser.add_argument("-g", "--gluster", help="check gluster mount", metavar="GLUSTER")
+#	parser.add_argument("-L", "--logging", help="logging to /var/log/dm-linux", action='store_true')
+	return parser.parse_args()
+
+def set_args_default(args):
+	if args.md5sum is None:
+		args.md5sum = Md5sum.FILES
+	else:
+		args.md5sum = Md5sum.FILES + args.md5sum
+	if args.timeoffset is None:
+		args.timeoffset = ['10']
+
+def main():
+	args = get_args()
+	set_args_default(args)
+	tasks = {}
+	for cls in Task.__subclasses__():
+		option = cls.__name__.lower()
+		if option == 'sysinfo':
+			params = [None]
+		else:
+			params = getattr(args, option)
+		if params is None: continue
+		for idx in range(len(params)):
+			prefix = f'{option}:{idx}'.upper()
+			tasks[prefix] = cls(prefix, params[idx])
+	cmds = []
+	for prefix in sorted(tasks.keys()):
+		cmds += tasks[prefix].cmds
+	p = subprocess.Popen(["ssh", "-o", "loglevel=error", "-np", str(args.port), args.host, "; ".join(cmds)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	sshout = p.communicate()[0]
+	if p.returncode != 0: err_exit('ERR-101: ssh failed! output is\n%s' % sshout)
+	for ln in sshout.decode('utf-8', 'ignore').rstrip().split('\n'):
+		idx = ln.find(':\t')
+		if idx == -1: continue
+		prefix = ln[:idx]
+		task = tasks[prefix]
+		task.println(prefix, ln[len(prefix)+2:])
+
+if __name__ == '__main__': main()

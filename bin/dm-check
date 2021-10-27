@@ -1,0 +1,99 @@
+#!/usr/bin/bash
+#20210204 flock
+#20201012
+#20201009 md5sum
+#20201001 less -P
+#20200925 tput lines -> less -F
+#20200911 tput lines
+#20200616 for -> find
+#20181012 [ -> [[
+#20181003	
+#20180108
+set -e
+trap "exit 1" TERM
+function helpme {
+	if [[ "$1" != "" ]]
+	then
+		echo -e "$1" 1>&2
+	else
+		cat /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | grep -e "	-\|^#" | grep -- "$(echo $OPT_SHORT | sed -e "s/://g" | sed -e "s/\(.\)/\t-\1 \\\|/g" | sed -e "s/$/^#$COMMAND\t\\\|^#[A-Z]/" )" | sed -e "s/^#$COMMAND\t/\t/; s/^#//" 1>&2
+	fi
+	PGID=$(cut -d ' ' -f 5 /proc/$$/stat)
+	kill -s TERM -- -$PGID
+}
+OPTS=$(getopt -o hvm: --long help,verbose,md5sum: -n "$(basename $0)" -- "$@")
+eval set -- "$OPTS"
+while :
+do
+	case "$1" in
+#HELPME_START
+#SYNOPSIS:
+#	dm-check [OPTION]... 
+#EXAMPLE:
+#	cd /opt/daimon/var; dm-check
+		-h | --help)
+			helpme ;;
+		-v | --verbose)	#optional, verbose
+			set -x
+			shift ;;
+		-m | --md5sum)	#=HASH, override 'out_standard' if the diff file has a md5sum of HASH.
+			MD5SUM=$2
+			shift 2 ;;
+		--)
+			shift
+			break ;;
+		*)
+			break ;;
+#HELPME_END
+	esac
+done
+CONFIG=/etc/daimon.conf
+. $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
+[[ $PWD = $DAIMON_HOME/var* ]] || helpme "ERR-101: cd to $DAIMON_HOME/var/ or one sub-directory under it before running dm-check"
+CUT=$(echo $DAIMON_HOME/var/ | wc -c)
+for f in $(find $* -type d | sort)
+do
+	[ -f $f/lock ] || continue
+	(
+		if ! flock -xn 99 
+		then
+			clear
+			read -n 1 -r -p "$f is locked, press ENTER to continue" 
+			exit
+		fi
+		[ ! -f $f/diff_count ] && exit
+		[ -f $f/diff_count ] && diff -q $f/diff_count <(echo 0) > /dev/null && exit
+		[ ! -f $f/out_current -o ! -f $f/out_standard ] && exit
+		[ -f $f/diff_current -a ! -s $f/diff_current ] && exit 
+		if [ -n "$MD5SUM" ]
+		then
+			DIFFSUM="$(md5sum $f/diff_current| cut -c 1-32)"
+			if [ "$DIFFSUM" = "$MD5SUM" ]
+			then
+				cp $f/out_current $f/out_standard && echo 0 > $f/diff_count
+				exit
+			else
+				echo md5sum: $DIFFSUM @$f
+			fi
+		else
+			clear
+			diff $f/out_current $f/out_standard | less -F -P "$(realpath $f | cut -c $CUT-)"
+			while :
+			do
+				read -n 1 -r -p "Standardize '$(realpath $f | cut -c $CUT-)'? [y/nq]" ynq
+				case "$ynq" in
+					Y|y )
+						mv $f/out_standard $f/history-$(date +%FT%T)-standard
+						cp $f/out_current $f/out_standard 
+						echo 0 > $f/diff_count
+						break;;
+					N|n|q )
+						break;;
+					* )
+						echo "Please answer y, n or q";;
+				esac
+			done
+			echo
+		fi
+	) 99> $f/lock
+done

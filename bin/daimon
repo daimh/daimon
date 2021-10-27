@@ -1,0 +1,175 @@
+#!/usr/bin/bash
+#Author Manhong Dai, MNI, U of Michigan
+#20211027 github
+#20211001 bug fix
+#20210722 helpme
+#20210212 ERR-002
+#20210204 flock
+#20200627 return smallest diff file
+#20200622 history-abnm norm
+#20190725 fixed the new 'mail' command doesn't accept comma
+#20190110 typo fix
+#20190109 diff_count in initialization
+#20181011 remove some col -b
+#20181003 sleep random (0-10) seconds
+#20181001 pipefail and FINAL
+#20180922 strings -> col -b
+#20180321 rm diff-previous if it is normal
+#20180307 print initial output to console
+#20151118 some modification for old version of bash only
+#20150720 $@ -> "$@"
+#20150630 diff_count for kill
+#20160216 -n default 3
+#20141225 LAST -> FINAL
+#20141104 kill stuck previous process
+#20140312 '-n 0'
+#20140224 add 'exit status'
+#20131028 in case diff_count doesn't exist
+#20130926 always send alerts out if command failed
+#20130421 major update, not compatible with old versions
+#20130415 send current when it is back to normal 
+#20121005 send good news if it is back to normal
+#20120831 flock to, warn if failed
+#20120825 change CMD
+#20120822 multiple standard files
+#20120111 put 'missing configuration' behind '-h'
+#20120110 added '-d'.
+#20111202 
+#20110926 added dailog ussage type
+set -o pipefail
+set -e
+trap "exit 1" TERM
+function helpme {
+	if [[ "$1" != "" ]]
+	then
+		echo -e "$1" 1>&2
+	else
+		cat /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | grep -e "	-\|^#" | grep -- "$(echo $OPT_SHORT | sed -e "s/://g" | sed -e "s/\(.\)/\t-\1 \\\|/g" | sed -e "s/$/^#$COMMAND\t\\\|^#[A-Z]/" )" | sed -e "s/^#$COMMAND\t/\t/; s/^#//" 1>&2
+	fi
+	PGID=$(cut -d ' ' -f 5 /proc/$$/stat)
+	kill -s TERM -- -$PGID
+}
+EMAIL=$USER
+let COUNT=1
+OPT_SHORT="hvt:m:n:"
+OPT_LONG="help,verbose,target:,mail:,count:"
+OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
+eval set -- "$OPTS"
+while :
+do
+	case "$1" in
+#HELPME_START
+#SYNOPSIS:
+#	daimon [OPTION]... -- CMD
+#EXAMPLE:
+#	daimon -t linux/host-a -- dm-linux host-a -d /:50
+		-h | --help)
+			helpme ;;
+		-v | --verbose)	#optional, verbose
+			set -x
+			shift ;;
+		-t | --target)	#target name
+			TARGET=$2
+			shift 2 ;;
+		-m | --mail)	#alertee email addresses, seperated by comma
+			EMAIL=$(echo $2 | sed -e "s/,/ /g")
+			shift 2 ;;
+		-n | --count)	#send up to COUNT alerts for the same incident, default 1
+			let COUNT=$2 || helpme "ERR-101: -n needs a number"
+			shift 2 ;;
+		--)
+			shift 1 ;;
+		*)
+			break ;;
+#HELPME_END
+	esac
+done
+CMD="$@"
+CONFIG=/etc/daimon.conf
+. $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
+[ -n "$DAIMON_HOME" ] || helpme "ERR-103: missing environment variable DAIMON_HOME in Configuration file $CONFIG"
+[ -d "$DAIMON_HOME" ] || helpme "ERR-104: $DAIMON_HOME is not a directory"
+[ -n "$TARGET" ] || helpme "ERR-105: TARGET is missing"
+ID=$DAIMON_HOME/var/$TARGET
+[ -t 1 ] || sleep $[ $RANDOM%10 ]
+if [ ! -f $ID/out_standard ]
+then
+	mkdir -p $ID
+	rm -f $ID/diff_count
+	if ! bash -c "$CMD" &> $ID/out_current
+	then 
+		cat $ID/out_current
+		echo 99999 > $ID/diff_count
+		helpme "ERR-106: INITIALIZING FAILED FOR $TARGET"
+	fi
+	mv $ID/out_current $ID/out_standard
+	cat $ID/out_standard 
+	cat $ID/out_standard | mail -s "$TARGET is initalized successfully. If the command output is not right, let admins know it" $EMAIL
+else
+	if fuser $ID/lock &> /dev/null
+	then
+		fuser -k $ID/lock &> /dev/null
+		echo "ERR-002: A previous $TARGET is still running, it is killed" >> $ID/out_current
+	else
+		rm -f $ID/out_current
+	fi
+	(
+		if ! flock -xn 99
+		then
+			echo | mail -s "$TARGET ERR-001: flock failed" $EMAIL
+		else
+			set +e
+			bash -c "$CMD" >> $ID/out_current 2>> $ID/out_current
+			let RTN=$?
+			set -e
+			if [ $RTN -ne 0 ]
+			then
+				echo "Sub-command returned $RTN" >> $ID/out_current
+			fi
+			for STD in $(cd $ID && ls out_standard.* 2>/dev/null) out_standard
+			do
+				if diff $ID/out_current $ID/$STD > $ID/diff_$STD 2> /dev/null
+				then
+					break
+				fi
+			done
+			cd $ID && mv $(ls -rS diff_out_standard* | head -n 1) diff_current && rm -f diff_out_standard* 2> /dev/null
+			if [ -s $ID/diff_current ]
+			then
+				if [ -f $ID/diff_count ] && diff -q $ID/diff_current $ID/diff_previous &> /dev/null
+				then
+					let FAILED=$(cat $ID/diff_count) || :
+					let FAILED=FAILED+1
+				else
+					let FAILED=1
+					cp $ID/diff_current $ID/diff_previous
+					cp $ID/diff_current $ID/history-$(date +%FT%T)-abnm
+				fi
+				echo $FAILED > $ID/diff_count
+				if [ $FAILED -le $COUNT ]
+				then
+					if [ $FAILED -eq $COUNT -a $COUNT -gt 1 ]
+					then
+						SUBJECT="$TARGET is detected (FINAL ALERT)"
+					else
+						SUBJECT="$TARGET is detected"
+					fi
+					cat $ID/diff_current | col -b 2>&1 | mail -s "$SUBJECT" $EMAIL
+				fi
+			else
+				if [ -f $ID/diff_count ]
+				then
+					let FAILED=$(cat $ID/diff_count) || :
+					if [ $FAILED -gt 0 ]
+					then
+						cat $ID/out_current | col -b 2>&1 | mail -s "$TARGET is back to normal" $EMAIL
+						echo $FAILED > $ID/history-$(date +%FT%T)-norm
+					fi
+				fi
+				echo 0 > $ID/diff_count
+				rm -f $ID/diff_previous
+			fi
+		fi 
+	) 99> $ID/lock
+fi
+
