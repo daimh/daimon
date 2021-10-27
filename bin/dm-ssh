@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+set -Eeufo pipefail
+trap "exit 1" TERM
+function cleanme {
+	set +u
+	[ -z "$Job" ] || rm -f $Job $Job-set $Job-exclude $Job-host-* $Job-nodes
+	set -u
+}
+function message {
+	[ ! -t 1 ] || tput setaf 1
+	echo -e $1
+	[ ! -t 1 ] || tput sgr0
+}
+function helpme {
+	cleanme
+	if [ $# -gt 0 ]
+	then
+		echo -e "$1" 1>&2
+	else
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220605
+	fi
+	kill -s TERM -- -$(cut -d ' ' -f 5 /proc/$$/stat)
+}
+DmsshConf=~/.dm-ssh.conf
+if [ ! -f $DmsshConf ]
+then
+	DmsshConf=/etc/dm-ssh.conf
+	[ -f $DmsshConf ] || helpme "ERR-001: missing config file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
+fi
+List=NO
+Delay=0
+Timeout=2
+OptShort="hvlu:s:e:E:H:j:d:t:"
+OptLong="help,version,list,user:set:,exclude-hosts:,exclude-sets:,header:,jobs:delay:timeout:"
+Opts=$(getopt -o $OptShort --long $OptLong -n dm-ssh -- "$@")
+HeaderLines=0
+SshUser=$USER
+Job=$(mktemp /tmp/dm-ssh-XXXX )
+[ -n "$Job" ] || helpme "ERR-007: failed to create temp file"
+Parallel=0
+echo -n > $Job-exclude
+eval set -- "$Opts"
+while [ $# -gt 0 ]
+do
+	case "$1" in
+#HELPME_START
+#NAME
+#	dm-ssh, parallel ssh
+#SYNOPSIS
+#	dm-ssh [OPTION]...
+#EXAMPLE
+#	echo -e "set1:\tlocalhost\nset2:\tlocalhost,$HOSTNAME" | tee ~/.dm-ssh.conf #define two host sets
+#	dm-ssh -h
+#	dm-ssh -s set1 -- hostname
+#	dm-ssh -s set2 -H 1 -- df -lh
+#DESCRIPTION
+		-h | --help)	#print help information
+			helpme ;;
+		--version)	#print version
+			helpme 20220924 ;;
+		-v )	#verbose output
+			set -x
+			shift ;;
+		-l | --list)	#list all sets and their hosts
+			List=YES
+			shift ;;
+		-u | --user)	#user name used to connect to the nodes
+			SshUser=$2
+			shift 2 ;;
+		-s | --set)	#host set name defined in output of '-l'
+			Set=$2
+			shift 2 ;;
+		-e | --exclude-hosts)	#exclude hosts. E.g. host-1,host-2
+			echo $2 | sed -e "s/,/\n/g" >> $Job-exclude
+			shift 2 ;;
+		-E | --exclude-sets)	#excluded host sets. E.g. set1,set2
+			echo $2 | sed -e "s/,/\n/g" | while read E
+			do
+				grep -q ^$E: $DmsshConf || helpme "ERR-006: exclude-set '$E' doesn't exist"
+				grep ^$E: $DmsshConf | cut -d '	' -f 2 |sed -e "s/,/\n/g" >> $Job-exclude
+			done
+			shift 2 ;;
+		-H | --header)	#number of header lines
+			((HeaderLines=$2))
+			shift 2 ;;
+		-j | --jobs)	#number of parallel jobs, default 0 means as many as possible
+			Parallel=$2
+			shift 2 ;;
+		-d | --delay)	#NUM, sleep a random fraction of NUM seconds before ssh-ing, default 0
+			((Delay=$2))
+			shift 2 ;;
+		-t | --timeout)	#SECONDS, ConnectTimeout in ssh, default 2
+			((Timeout=$2))
+			shift 2 ;;
+		--)
+			shift 1
+			break ;;
+		*)
+			break ;;
+#AUTHOR
+#	Manhong Dai, MNI, U of Michigan
+#COPYRIGHT
+#	Copyright © 2002-2023 University of Michigan. MIT License
+#HELPME_END
+	esac
+done
+if [ "$List" = "YES" ]
+then
+	cat $DmsshConf
+	cleanme
+	exit
+fi
+Cmd="$*"
+[ $# -gt 0 ] || helpme "ERR-002: use -h/--help"
+[ -n "$Set" ] || helpme "ERR-003: parameter -s is missing"
+which parallel &> /dev/null || helpme "ERR-004: missing command 'parallel'"
+grep ^$Set: $DmsshConf > $Job-set || helpme "ERR-005: such set doesn't exist"
+set +e
+if [ "$Set" != "all" -a "$(join -v 2 <(grep ^$Set: $DmsshConf | cut -d '	' -f 2 |sed -e "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude) | wc -l )" != "0" ]
+then
+	join -v 2 <(grep ^$Set: $DmsshConf | cut -d '	' -f 2 |sed -e "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude)
+	read -n 1 -r -p "The nodes above are excluded, but they are not in the node set \"$Set\", you might want to fix your -e/E. continue? [y/N]" yn
+	case "$yn" in
+		Y|y )
+			echo
+			;;
+		N|n )
+			echo
+			cleanme
+			exit 1 ;;
+		* )
+			helpme "Please answer y or n!"
+	esac
+fi
+join -v 1 <( cut -d '	' -f 2 $Job-set | sed -e "s/,/\n/g" | sort -u ) <(sort -u $Job-exclude) > $Job-nodes
+message "####ssh to####"
+echo -ne "..$(head -n 1 $Job-nodes)\r" 1>&2
+paste <(cat $Job-nodes) <(tail -n +2 $Job-nodes; echo DONE ) |parallel -k -j $Parallel --colsep '\t' "
+	sleep \$(bc <<< \"scale=3; $Delay*\$RANDOM/32768\" );
+	ssh -o ConnectTimeout=$Timeout -o LogLevel=error -o StrictHostKeyChecking=no -o BatchMode=yes -n $SshUser@{1} \"$Cmd\" &> $Job-host-{1};
+	Rtn=\$?;
+	echo -n -e \"\$Rtn:{1} \n..{2}\r\" 1>&2;
+	[ \"\$(tail -c 1 $Job-host-{1} | od -iAn | tr -d ' ' )\" != \"10\" ] && echo -e \"\n\" >> $Job-host-{1};
+	echo \$Rtn >> $Job-host-{1};
+"
+message "####Output####"
+[ ! -t 1 ] || tabs 16
+FailedHosts=()
+HeaderPrinted=NO
+re='^[0-9]+$'
+for ((Cmp=0; Cmp<2; Cmp++))
+do
+	set +f
+	for F in $Job-host-*
+	do
+		Rtn=$(tail -n 1 $F)
+		if [ -z "$Rtn" ]
+		then
+			let Rtn=1
+		elif [[ $Rtn =~ $re ]]
+		then
+			let Rtn=$Rtn
+		else
+			let Rtn=1
+		fi
+		if [[ ( $Rtn = 0 && $Cmp = 0 ) || ( $Rtn != 0 && $Cmp != 0 ) ]]
+		then
+			if [ "$HeaderPrinted" = "NO" -a $Rtn -eq 0 ]
+			then
+				HeaderPrinted=YES
+				head -n $HeaderLines $F | sed -e "s/^/HeaderLines:\t/"
+				((HeaderLines++))
+			fi
+			Host="$(echo $F | sed -e 's/.*-host-//' )"
+			tail -n +$HeaderLines $F | head -n -1 | sed -e "s/^/$Rtn:$Host:\t/"
+		elif [ $Cmp -eq 0 ]
+		then
+			FailedHosts+=( $( basename $F |cut -d - -f 5-))
+		fi
+	done
+	set -f
+done
+cleanme
+[ ${#FailedHosts[@]} -gt 0 ] && message "\n####Failed hosts: ${#FailedHosts[@]}" && echo "${FailedHosts[*]}"
+[ ! -t 1 ] || tabs 8
+[ ${#FailedHosts[@]} -eq 0 ]

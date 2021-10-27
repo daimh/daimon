@@ -1,0 +1,14 @@
+SHELL=/bin/bash
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/root/bin:/opt/daimon/bin
+MAILFROM=no-reply
+MAILTO=alertee@example.com
+HOME=/
+
+#Daily report
+0 8 * * * no-reply dm-report
+#Linux
+*/6 * * * * no-reply daimon -t linux/host-a -- dm-linux host-a -t 52 -s sda,sdb -d TMPFS,/:50 -d /home:90 --md5sum \"/opt/sensitive/*.secret\" --stat \"/home/*\"
+*/6 * * * * no-reply daimon -t linux/host-b -- dm-linux host-b --storcli 44C
+*/6 * * * * no-reply daimon -t linux/host-c -- dm-linux host-c --areca 50C:1 -o 20
+#Ups
+*/6 * * * * no-reply daimon -t ups/77 -- dm-ups -u user -p password --ups-firmware=3.5.8 --Apparent-Load-Power=:85 --Battery-Voltage=212:219 --Input-Frequency=59:61 --Input-Voltage=190:216 --Internal-Temp=75:96 --Load-Power=:85 --Max-Line-Voltage=:216 --Min-Line-Voltage=188: --Output-Frequency=59:61 --Output-Voltage=205:212 --Runtime-Remaining=10: --Self-Test-Date=ANY 192.168.88.77

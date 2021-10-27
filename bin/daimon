@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -eEufo pipefail
+trap "exit 1" TERM
+function helpme {
+	if [ $# -gt 0 ]
+	then
+		echo -e "$1" 1>&2
+	else
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220605
+	fi
+	kill -s TERM -- -$(cut -d ' ' -f 5 /proc/$$/stat)
+}
+DaimonConf=/etc/daimon.conf
+. $DaimonConf || helpme "ERR-100: Configuration file $DaimonConf is missing"
+Args="$*"
+EmailTo=""
+Task=""
+Withhold=NO
+let Count=1
+let Timeout=60
+OptShort="hvt:m:n:s:w"
+OptLong="help,version,task:,mail:,count:,seconds:,withhold"
+Opts=$(getopt -o $OptShort --long $OptLong -n "$(basename $0)" -- "$@")
+eval set -- "$Opts"
+while [ $# -gt 0 ]
+do
+	case "$1" in
+#HELPME_START
+#SYNOPSIS
+#	daimon [OPTION]... -- CMD
+#EXAMPLE
+#	daimon -t linux/host-a -- dm-linux host-a -d 50
+#DESCRIPTION
+		-h | --help)	#print help information
+			helpme ;;
+		--version)	#print version
+			helpme 20221103 ;;
+		-v )	#verbose output
+			set -x
+			shift ;;
+		-t | --task)	#NAME of a sub-directory under $DaimonVar
+			Task=$2
+			shift 2 ;;
+		-m | --mail)	#EMAIL addresses the alerts will be sent to, seperated by comma, default $USER
+			EmailTo=$(echo $2 | sed -e "s/,/ /g")
+			shift 2 ;;
+		-n | --count)	#up to COUNT alerts will be sent for a new incident, default 1
+			let Count=$2 || helpme "ERR-101: -n needs a positive number"
+			shift 2 ;;
+		-s | --seconds)	#TIMEOUT of the command in seconds, default 60
+			let Timeout=$2 || helpme "ERR-107: -s needs a positive number"
+			shift 2 ;;
+		-w | --withhold)	#withhold printing daimon arguments
+			Withhold=YES
+			shift ;;
+		--)
+			shift 1 ;;
+		*)
+			break ;;
+#AUTHOR
+#	Manhong Dai, MNI, U of Michigan
+#COPYRIGHT
+#	Copyright © 2002-2023 University of Michigan. MIT License
+#HELPME_END
+	esac
+done
+if [ "$DaimonEmail" != "NO" ]
+then
+	set +u
+	[ -n "$EmailTo" ] || EmailTo=$MAILTO
+	[ -n "$EmailTo" ] || EmailTo=$USER
+	set -u
+	[ -n "$EmailTo" ] || helpme "ERR-102: -m needs an email address"
+fi
+Cmd="$@"
+[ -n "$DaimonVar" ] || helpme "ERR-103: missing environment variable DaimonVar in Configuration file $DaimonConf"
+[ -d "$DaimonVar" ] || helpme "ERR-104: $DaimonVar is not a directory"
+[ -n "$Task" ] || helpme "ERR-105: Task is missing"
+Dir=$DaimonVar/$Task
+[ -t 1 ] || sleep $[ $RANDOM%10 ]
+mkdir -p $Dir
+rm -f $Dir/out-current
+[ "$Withhold" != "NO" ] || echo $Args >> $Dir/out-current
+if fuser $Dir/lock &> /dev/null
+then
+	fuser -k $Dir/lock &> /dev/null
+	echo "ERR-002: A previous $Task is killed as it is stuck" >> $Dir/out-current
+fi
+(
+	if ! flock -xn 99
+	then
+		Msg="$Task ERR-001: flock failed"
+		[ "$DaimonEmail" = "NO" ] || echo | mail -s "$Msg" $EmailTo
+		helpme "$Msg"
+	fi
+	set +e
+	timeout $Timeout bash -c "$Cmd" >> $Dir/out-current 2>> $Dir/out-current
+	let Rtn=$?
+	set -e
+	echo "$Rtn" > $Dir/out-exitcode
+	if [ ! -f $Dir/out-standard ]
+	then
+		rm -f $Dir/diff-count
+		if [ $Rtn -ne 0 ]
+		then
+			cat $Dir/out-current
+			echo 99999 > $Dir/diff-count
+			helpme "ERR-106: Initialization failed for $Task"
+		fi
+		mv $Dir/out-current $Dir/out-standard
+		cat $Dir/out-standard
+		[ "$DaimonEmail" = "NO" ] || cat $Dir/out-standard | mail -s "$Task is initalized successfully. If the command output is not right, let admins know it" $EmailTo
+	else
+		if [ $Rtn -eq 124 -o $Rtn -eq 125 -o $Rtn -eq 126 -o $Rtn -eq 127 -o $Rtn -eq 137 ]
+		then
+			echo "timeout returned $Rtn" >> $Dir/out-current
+		elif [ $Rtn -ne 0 ]
+		then
+			echo "sub-command returned $Rtn" >> $Dir/out-current
+		fi
+		set +f
+		for Standard in $(cd $Dir && ls out-standard.* 2>/dev/null) out-standard
+		do
+			if diff $Dir/out-current $Dir/$Standard > $Dir/diff-$Standard 2> /dev/null
+			then
+				break
+			fi
+		done
+		cd $Dir && mv $(ls -rS diff-out-standard* | head -n 1) diff-current && rm -f diff-out-standard* 2> /dev/null
+		set -f
+		if [ -f $Dir/diff-count ]
+		then
+			let FailedCntPrv=$(cat $Dir/diff-count) || :
+		else
+			let FailedCntPrv=0 || :
+		fi
+		if [ -s $Dir/diff-current ]
+		then
+			if [ $FailedCntPrv -gt 0 ] && diff -q $Dir/diff-current $Dir/diff-previous &> /dev/null
+			then
+				let FailedCountCur=$FailedCntPrv+1
+			else
+				let FailedCountCur=1
+				cp $Dir/diff-current $Dir/diff-previous
+				cp $Dir/diff-current $Dir/history-$(date +%FT%T)-abnm
+			fi
+			echo $FailedCountCur > $Dir/diff-count
+			if [ $FailedCountCur -le $Count ]
+			then
+				if [ $FailedCountCur -eq $Count -a $Count -gt 1 ]
+				then
+					SUBJECT="$Task is detected (FINAL ALERT)"
+				else
+					SUBJECT="$Task is detected"
+				fi
+				[ "$DaimonEmail" = "NO" ] || cat $Dir/diff-current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EmailTo
+			fi
+		else
+			if [ $FailedCntPrv -gt 0 ]
+			then
+				[ "$DaimonEmail" = "NO" ] || cat $Dir/out-current | strings -n 1 2>&1 | mail -s "$Task is back to normal" $EmailTo
+				echo $FailedCntPrv > $Dir/history-$(date +%FT%T)-norm
+			fi
+			echo 0 > $Dir/diff-count
+			rm -f $Dir/diff-previous
+		fi
+	fi
+) 99> $Dir/lock

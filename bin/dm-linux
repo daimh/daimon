@@ -1,0 +1,687 @@
+#!/usr/bin/env python3
+# https://github.com/daimh/daimon
+import argparse
+import re
+import subprocess
+import sys
+import time
+
+
+def err_exit(msg):
+	print(f'\n{msg}', file=sys.stderr)
+	exit(1)
+
+
+def get_args():
+	parser = argparse.ArgumentParser()
+	parser.add_argument('host', help='host', metavar='[user@]host')
+	parser.add_argument(
+		'-p',
+		'--port',
+		type=int,
+		help='Port number of the linux target'
+	)
+	parser.add_argument('-V', '--version', action='version', version='20220828')
+	for cls in Task.__subclasses__():
+		add_class_to_parser(cls, parser)
+	return parser.parse_args()
+
+
+def set_args_default(args):
+	if args.md5sum is None:
+		args.md5sum = Md5sum.FILES
+	else:
+		args.md5sum = Md5sum.FILES + args.md5sum
+	if args.allowedtimeoffset is None:
+		args.allowedtimeoffset = ['20S']
+
+
+def add_class_to_parser(cls, parser):
+	if cls.option:
+		parser.add_argument(
+			f'-{cls.option}',
+			f'--{cls.__name__.lower()}',
+			help=cls.helpmsg,
+			metavar=cls.metavar,
+			action='append',
+			nargs='?'
+		)
+	else:
+		parser.add_argument(
+			f'--{cls.__name__.lower()}',
+			help=cls.helpmsg,
+			metavar=cls.metavar,
+			action='append',
+			nargs='?'
+		)
+	for subcls in cls.__subclasses__():
+		add_class_to_parser(subcls, parser)
+
+
+def add_class_to_task(cls, args, tasks):
+	for subcls in cls.__subclasses__():
+		add_class_to_task(subcls, args, tasks)
+	option = cls.__name__.lower()
+	params = getattr(args, option)
+	if option != 'sysinfo':
+		if params is None:
+			return
+	elif params is None:
+		params = [None]
+	for idx in range(len(params)):
+		tsk = cls(params[idx])
+		prefix = f'{option}:{idx}'.upper()
+		wrapper = []
+		for c in tsk.cmds:
+			wrapper.append(
+				f'(set -Ee; {c}) 2>&1 | sed -e "s/^/{prefix}:\t/";'
+			)
+			if c.startswith('date '):
+				c = 'date'
+			wrapper[-1] += f'echo "{prefix}:exit:$?:\t{c}";'
+		tsk.cmds = wrapper
+		tsk.cmds.append(f'echo "{prefix}:summary:\t";')
+		tasks[prefix] = tsk
+
+
+class Task():
+	option = None
+
+	def __init__(self):
+		self.cmds = []
+
+	def summary(self, prefix):
+		pass
+
+
+class DfCheck(Task):
+	option = 'd'
+	helpmsg = "check mountpoint usage with a percentage threshold and a" \
+		"comma-separated list of mountpoints or  filesystem type, or 'LOCAL'." \
+		"Example: '-d 80P', '-d 50P:nfs4,xfs', '-d 85P:LOCAL'"
+	metavar = 'THRESHOLD%(:MOUNTPOINTS)'
+
+	def __init__(self, param):
+		super().__init__()
+		self.lns = []
+		if ':' in param:
+			self.threshold, mountpoints = param.split(':')
+		else:
+			self.threshold, mountpoints = param, ''
+		if not self.threshold.endswith('P'):
+			err_exit('ERR-109: wrong operand for --dfcheck')
+		self.threshold = int(self.threshold[:-1])
+		for mp in mountpoints.split(','):
+			if mp == '':
+				cmd = f'df -hP'
+			elif mp == 'LOCAL':
+				cmd = f'df -hPl'
+			elif not mp.startswith('/'):
+				cmd = f'df -hPt {mp}'
+			else:
+				cmd = f'mountpoint {mp} &> /dev/null && df -hP {mp}'
+			self.cmds.append(f'{cmd} | tail -n +2 | grep -v /run/user')
+
+	def getln(self, ln):
+		fs = ln.split()
+		try:
+			size = fs[1]
+			used = int(fs[4][:-1])
+			avail = fs[3]
+			if used >= self.threshold:
+				self.lns.append('%s\t%s\t%d%%\t%d%%\t%s\t%s' % (
+					size, avail, used, self.threshold, fs[5], fs[0]))
+			else:
+				self.lns.append('%s\t\tOK\t\t%s\t%s' % (size, fs[5], fs[0]))
+		except ValueError:
+			return ln
+
+	def summary(self, prefix):
+		if prefix.endswith(':0'):
+			print(f'{prefix}:\tSize\tAvail\tUsed%\tThreshold%\tMounted on\tFilesystem')
+		for ln in self.lns:
+			print(f'{prefix}:\t{ln}')
+
+
+class SmartCheck(Task):
+	option = 's'
+	helpmsg = "check disk SMART status. IGNORE_KEYWORDS in smartctl output" \
+		"will be skipped, 'Local Time' is always ignored. Both DRIVES and" \
+		"IGNORE_KEYWORDS are comma-separated. Example: '-s sda,sdb'"
+	metavar = 'DRIVES:IGNORE_KEYWORDS'
+
+	def __init__(self, param):
+		super().__init__()
+		fs = param.split(':')
+		self.check = ['Local Time is']
+		if len(fs) > 1:
+			self.check += fs[1].split(',')
+		self.check = list(set(self.check))
+		for drv in fs[0].split(','):
+			self.cmds.append(
+				f'(smartctl -iH /dev/{drv} || :) | tail -n +4 |sed -e "s/^/{drv}:\t/"'
+			)
+
+	def getln(self, ln):
+		for key in self.check:
+			if ln[ln.index(':')+2:].startswith(f'{key}:'):
+				return
+		return ln
+
+
+class Dmesg(Task):
+	option = 'm'
+	helpmsg = "search a list of KEYWORDS in dmesg output. Example: '-m failed'"
+	metavar = 'KEYWORDS'
+
+	def __init__(self, param):
+		super().__init__()
+		self.cmds.append(f'dmesg -T | grep -E "{param}" || true')
+
+	def getln(self, ln):
+		return ln
+
+
+class LoadCheck(Task):
+	option = 'l'
+	helpmsg = "print uptime if any of the three load average is greater than" \
+		"+F or less than -F. Example: '-l +1.5', '-l -99'"
+	metavar = '±THRESHOLD'
+
+	def __init__(self, param):
+		super().__init__()
+		self.check = float(param)
+		self.cmds.append('uptime')
+
+	def getln(self, ln):
+		loads = [float(s) for s in ln.split('load average: ')[1].split(', ')]
+		if self.check >= 0:
+			if max(loads) >= self.check:
+				return ln
+		elif min(loads) <= -self.check:
+			return ln
+
+
+class Command(Task):
+	option = 'c'
+	helpmsg = "run COMMAND on the target host. Example: '-c pidof" \
+		"ImportantProcess'"
+	metavar = 'COMMAND'
+
+	def __init__(self, param):
+		super().__init__()
+		self.cmds.append(param)
+
+	def getln(self, ln):
+		return ln
+
+
+class Temperature(Task):
+	option = 't'
+	helpmsg = "check 'sensors' output with a threshold of the hottest read." \
+		"Example: '-t 50C'"
+	metavar = 'TEMPERATURE'
+
+	def __init__(self, param):
+		super().__init__()
+		if not param.endswith('C'):
+			err_exit('ERR-112: wrong operand for --temperature')
+		self.check = int(param[:-1])
+		self.cmds.append('sensors -u')
+		self.re_p = re.compile(r'  temp[0-9]+_input: ')
+
+	def getln(self, ln):
+		m = self.re_p.match(ln)
+		if m is not None:
+			if float(ln[m.span()[1]:]) > self.check:
+				return ln
+
+
+class Stat(Task):
+	helpmsg = "'stat' permission and owner of FILES. Example: '--stat /home'"
+	metavar = 'FILES'
+
+	def __init__(self, param):
+		super().__init__()
+		for fl in param.split(','):
+			self.cmds.append(f"stat -c '%A\t%i\t%U\t%G\t%n' {fl}")
+
+	def getln(self, ln):
+		return ln
+
+
+class Md5sum(Task):
+	FILES = ['.ssh/authorized_keys,/etc/passwd,/etc/ssh/sshd_config']
+	helpmsg = f"'md5sum' FILES in addition to {FILES}. Example: --md5sum" \
+		"/etc/MyPrivateKey"
+	metavar = 'FILES'
+
+	def __init__(self, param):
+		super().__init__()
+		for fl in param.split(','):
+			self.cmds.append(f'md5sum {fl} || :')
+
+	def getln(self, ln):
+		return ln
+
+
+class AllowedTimeOffset(Task):
+	option = 'o'
+	helpmsg = "check time offset in seconds with an allowed threshold." \
+		"Example: '-o 30S'"
+	metavar = 'SECONDS'
+
+	def __init__(self, param):
+		super().__init__()
+		if not param.endswith('S'):
+			err_exit('ERR-113: wrong operand for --allowedtimeoffset')
+		self.check = int(param[:-1])
+		now = int(time.time())
+		self.cmds.append(f'date "+%s - {now}"')
+
+	def getln(self, ln):
+		fs = [int(s) for s in ln.split(' - ')]
+		diff = fs[0] - fs[1]
+		if diff < self.check:
+			return
+		return f'{diff}'
+
+
+class Sysinfo(Task):
+	helpmsg = "check some standard system information. It supports only" \
+		"'netoff', which turns off network checking. Example: '--sysinfo netoff'"
+	metavar = 'SWITCH'
+
+	def __init__(self, param):
+		super().__init__()
+		self.cmds += [
+			f'uname -a',
+			f'head -n 1 /proc/meminfo',
+			f'[ ! -f /proc/mdstat ] || grep -v bitmap: /proc/mdstat',
+			f'[ ! -f /proc/drbd ] || drbdadm status',
+		]
+		if param is None:
+			self.cmds += [
+				f'[ ! -f /proc/net/bonding/bond0 ] || cat /proc/net/bonding/bond*',
+				f'ip -br a',
+				f'ip r',
+			]
+		elif param != 'netoff':
+			err_exit('ERR-107: wrong operand for --sysinfo')
+		self.re_p = re.compile(r'md[0-9]+ : ')
+
+	def getln(self, ln):
+		if self.re_p.match(ln):
+			fs = ln.split(' ')
+			ln = ' '.join(fs[:4] + sorted(fs[4:]))
+		return ln
+
+
+class Areca(Task):
+	helpmsg = "check Areca raid card with a drive temperature threshold and" \
+		"an optional number of Areca raid cards. Example: '--areca 50C'," \
+		"'--areca 50C:2'"
+	metavar = 'TEMPERATURE or TEMPERATURE:NUMBER'
+
+	def __init__(self, param):
+		super().__init__()
+		fs = param.split(':')
+		if len(fs) != 2 or fs[0][-1] != 'C':
+			err_exit('ERR-106: wrong operand for --areca')
+		self.temperature = int(fs[0][:-1])
+		cli64 = '%s\nquit' % '\n'.join([
+			'set curctrl=%d\nhw info\nvsf info\ndisk info' % (idx+1)
+			for idx in range(int(fs[1]))
+		])
+		self.cmds.append(f'echo -e "{cli64}" | (cli64 | strings -n 1 || true)')
+		self.printit = True
+
+	def getln(self, ln):
+		if 'Ctrl Temperature' in ln or 'Controller Temp.' in ln:
+			idx = ln.rindex(': ') + 2
+			if int(ln[idx:ln.index(' ', idx)]) >= self.temperature:
+				return ln
+			return
+		if (
+			ln.startswith('[Controller H/W Monitor]') or
+			ln.startswith('CLI> The Hardware Monitor Information')
+		):
+			self.printit = False
+			return
+		if ln.startswith('CLI>'):
+			self.printit = True
+			return ln
+		if self.printit:
+			return ln
+
+
+class Storcli(Task):
+	helpmsg = "check LSI Raid card with a ROC temperature threshold, a" \
+		"drive temperature threshold, and an optional disk array form" \
+		"factor. Example: '--storcli 95C:50C', '--storcli 95C:50C:60-bay'"
+	metavar = 'ROC_TEMPERATURE:DRIVE_BBU_TEMPERATURE or ' \
+		'ROC_TEMPERATURE:DRIVE_BBU_TEMPERATURE:60-bay'
+
+	def __init__(self, param):
+		super().__init__()
+		self.hdds = []
+		self.formfactor = None
+		fs = param.split(':')
+		if len(fs) < 2 or len(fs) > 3 or fs[0][-1] != 'C' or fs[1][-1] != 'C':
+			err_exit('ERR-104: wrong operand for --storcli')
+		self.temperature_roc = int(fs[0][:-1])
+		self.temperature_drv = int(fs[1][:-1])
+		self.formfactor = fs[2] if len(fs) > 2 else None
+		self.cmds += [
+			f'/opt/MegaRAID/storcli/storcli64 /call show all',
+			f'/opt/MegaRAID/storcli/storcli64 /call /eall /sall show all'
+		]
+		self.ln_bt_check = 0
+
+	def summary(self, prefix):
+		re_slot = re.compile(
+			'Drive /c([0-9]+)/e([0-9]+)/s([0-9]+) Device attributes :'
+		)
+		sns_each_card_enc = {}
+		for hd in self.hdds:
+			if len(hd) != 3:
+				err_exit('ERR-103')
+			mt = re_slot.match(hd[0])
+			if mt is None:
+				err_exit('ERR-102')
+			s_card, s_enc, s_slot = int(mt.group(1)), int(mt.group(2)), int(mt.group(3))
+			s_sn = hd[1].split(' = ')[1].strip()
+			s_sz = hd[2].split(' = ')[1]
+			s_sz = s_sz[:s_sz.index(' [')]
+			ce_slot = sns_each_card_enc.setdefault(f'/c{s_card}/e{s_enc}', {})
+			ce_slot[s_slot] = (s_sn, s_sz)
+		for card_enc, slot_sns in sns_each_card_enc.items():
+			for sn in sorted(slot_sns.items()):
+				print(f'{prefix}:\t{card_enc}/s{sn[0]}', sn[1][0], sn[1][1], sep='\t')
+		if self.formfactor == '60-bay':
+			for card_enc, slot_sns in sns_each_card_enc.items():
+				print(
+					f'{prefix}:\t#{card_enc}, ▲: Left/Right, '
+					'▼: Right/Left, ◄: Front/Back, ►: Back/Front'
+				)
+				if len(slot_sns) != 20:
+					print('{prefix}:\tno 20 drives')
+					continue
+				slot_sns = [sn[0] for sl, sn in sorted(slot_sns.items())]
+				for row in range(5):
+					print(
+						f'{prefix}:\t',
+						'\t'.join(
+							[
+								slot_sns[col*5 + row] for col in (range(4))
+								if col*5 + row < len(slot_sns)
+							]
+						),
+						sep=''
+					)
+
+	def getln(self, ln):
+		if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
+			self.hdds.append([ln])
+		elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
+			self.hdds[-1].append(ln)
+		if ln.startswith('Current System Date/time = '):
+			return
+		if ln.startswith('Current Controller Date/Time = '):
+			return
+		if ln.startswith('Next Patrol Read launch = '):
+			return
+		if ln.startswith('Next Consistency check launch = '):
+			return
+		if ln.startswith('Next Battery Learn = '):
+			return
+		# Some old version of storcli returns Celcius.
+		if ln.startswith('ROC temperature(Degree Cel'):
+			if int(ln.split('=')[1]) >= self.temperature_roc:
+				return ln
+			return 'ROC temperature(Degree Celsius) = OK'
+		if ln.startswith('iBBU '):
+			ln = ' '.join(ln.split()[:2])
+			return ln
+		if ln.startswith('Drive Temperature ='):
+			if (
+				'N/A' in ln or
+				'C' not in ln or
+				int(ln.split('=')[1].split('C')[0]) >= self.temperature_drv
+			):
+				return ln
+			return 'Drive Temperature = OK'
+		if ln.startswith('CVPM0'):
+			m = re.compile(' [0-9]+C ').search(ln)
+			if m is not None:
+				tmp = int(m.group(0)[1:-2])
+				if tmp <= self.temperature_drv:
+					ln = ln.replace(m.group(0), ' OK ')
+				if tmp <= self.temperature_drv:
+					ln = ln[:m.span()[0]] + ' OK'
+			return ln
+		if re.compile('.* [DG]HS .* [DTU]  -$').search(ln) is not None:
+			return ln[:-4] + '#  -'
+		if re.compile('.* [DG]HS .* [DTU]$').search(ln) is not None:
+			return ln[:-2] + '#'
+		if self.ln_bt_check == 0 and ln.startswith('DG Arr Row EID:Slot DID Type '):
+			self.ln_bt_check = 1
+			return ln
+		if self.ln_bt_check == 1:
+			if not ln.startswith('-------'):
+				err_exit('ERR-108: unexpected line in storcli')
+			self.ln_bt_check = 2
+			return ln
+		if self.ln_bt_check == 2:
+			if ln.startswith('-------'):
+				self.ln_bt_check = 0
+			else:
+				ln = ln.replace(' Optl  Y ', ' Optl  # ')
+				ln = ln.replace(' Optl  N ', ' Optl  # ')
+				ln = ln.replace(' Onln  Y ', ' Onln  # ')
+				ln = ln.replace(' Onln  N ', ' Onln  # ')
+			return ln
+		return ln
+
+
+class Megacli(Task):
+	helpmsg = "use legacy 'megacli' to check LSI raid card with a drive" \
+		"temperature alert threshold. Example: '--megacli 50C'"
+	metavar = 'TEMPERATURE'
+
+	def __init__(self, param):
+		super().__init__()
+		if param[-1] != 'C':
+			err_exit('ERR-105: wrong operand for --megacli')
+		self.temperature = int(param[:-1])
+		self.cmds.append('/opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL')
+
+	def getln(self, ln):
+		if (
+			not ln.startswith('Drive Temperature :') or
+			int(ln[19:ln.index('C', 19)]) >= self.temperature
+		):
+			return ln
+
+
+class Nvidia(Task):
+	helpmsg = "check NVIDIA card with a utilization percentage, a" \
+		"temperature threshold, and a power draw. Example: '--nvidia 50P:90C:40W'"
+	metavar = 'TEMPERATURE:POWER'
+
+	def __init__(self, param):
+		super().__init__()
+		fs = param.split(':')
+		if (
+			len(fs) != 3 or
+			not fs[0].endswith('P') or
+			not fs[1].endswith('C') or
+			not fs[2].endswith('W')
+		):
+			err_exit('ERR-110: wrong operand for --nvidia')
+		self.utilization_amid = False
+		self.utilization = int(fs[0][:-1])
+		self.temperature = int(fs[1][:-1])
+		self.power = float(fs[2][:-1])
+		self.cmds.append('nvidia-smi -q')
+
+	def getln(self, ln):
+		if ln.startswith('Timestamp'):
+			return
+		if ln.startswith('    Fan Speed'):
+			return
+		if ln.startswith('    Performance State'):
+			return
+		if ln.startswith('        Rx Throughput'):
+			return
+		if ln.startswith('        Tx Throughput'):
+			return
+		if ln.startswith('        Idle'):
+			return
+		if ln.startswith('        SW Power Cap'):
+			return
+		if ln.startswith('                Current'):
+			return
+		if ln.startswith('                    Current'):
+			return
+		if ln.endswith('mV'):
+			return
+		if ln.endswith('MHz'):
+			return
+		if ln.endswith('MiB'):
+			if 'Free' in ln or 'Used' in ln:
+				return
+		elif ln.startswith('        GPU Current Temp'):
+			if int(ln[ln.index(':')+1:ln.rindex('C')]) < self.temperature:
+				return '        GPU Current Temp                  : OK'
+		elif ln.startswith('        Power Draw'):
+			if float(ln[ln.index(':')+1:ln.rindex('W')]) < self.power:
+				return '        Power Draw                        : OK'
+		elif ln.startswith('    Utilization'):
+			self.utilization_amid = True
+		elif self.utilization_amid:
+			if not ln.startswith('        '):
+				self.utilization_amid = False
+			else:
+				ifrom = ln.index(':')+1
+				ito = ln.rindex('%')
+				if int(ln[ifrom:ito]) < self.utilization:
+					ln = ln[:ifrom] + ' OK'
+		return ln
+
+
+class Lvs(Task):
+	helpmsg = "check logical volume, optionally with two thresholds for" \
+		"cached LV, or '0' for regular LV. Example: '--lvs', '--lvs 80:50'"
+	metavar = 'DATAPCT:METAPCT'
+
+	def __init__(self, param):
+		super().__init__()
+		if param is None:
+			self.data_pct, self.meta_pct = 0, 0
+		else:
+			fs = param.split(':')
+			if len(fs) != 2:
+				err_exit('''ERR-111: --lvs can have two thresholds for cached
+					LV, such as "--lvs 1:1"''')
+			self.data_pct = int(fs[0])
+			self.meta_pct = int(fs[1])
+		self.cmds.append('lvs')
+		self.re_p = re.compile(' +[^ ]+')
+
+	def getln(self, ln):
+		fs = self.re_p.findall(ln)
+		if len(fs) == 9 and fs[4].endswith(']') and fs[5].endswith(']'):
+			if float(fs[6]) < self.data_pct and float(fs[7]) < self.meta_pct:
+				fs[6] = 'OK'.rjust(len(fs[6]), ' ')
+				fs[7] = 'OK'.rjust(len(fs[7]), ' ')
+				return ''.join(fs)
+		return ln
+
+
+class Ceph(Task):
+	helpmsg = "check ceph filesystem health status with a threshold of" \
+		"usage percentage. Example: '--ceph 10P'"
+	metavar = 'THRESHOLD'
+
+	def __init__(self, param):
+		super().__init__()
+		if not param.endswith('P'):
+			err_exit('ERR-115: wrong operand for --ceph')
+		self.threshold = int(param[:-1])
+		self.cmds.append('ceph -s')
+		self.re_since = re.compile('since [0-9]+[a-z]')
+		self.re_age = re.compile('age [0-9]+[a-z]')
+		self.all_done = False
+
+	def getln(self, ln):
+		if self.all_done:
+			return
+		if ln.startswith('    objects:'):
+			return
+		if ln.startswith('    usage:'):
+			fs = ln.split()
+			if fs[6] != '/':
+				err_exit(f'ERR-114')
+			if 100 * int(fs[1]) / int(fs[7]) < self.threshold:
+				ln = '    usage: OK'
+			self.all_done = True
+			return ln
+		ln = self.re_since.sub('#', ln)
+		ln = self.re_age.sub('#', ln)
+		return ln
+
+
+def main():
+	args = get_args()
+	set_args_default(args)
+	tasks = {}
+	for cls in Task.__subclasses__():
+		add_class_to_task(cls, args, tasks)
+	cmds = ['set -uo pipefail;']
+	for prefix in sorted(tasks.keys()):
+		cmds += tasks[prefix].cmds
+	cmds = [
+		'ssh',
+		'-n',
+		'-o',
+		'LogLevel=error',
+		'-o',
+		'BatchMode=yes',
+		args.host,
+		''.join(cmds)
+	]
+	if args.port is not None:
+		args.insert(1, '-p')
+		args.insert(2, str(args.port))
+	p = subprocess.Popen(
+		cmds,
+		stdout=subprocess.PIPE,
+		stderr=subprocess.STDOUT
+	)
+	sshout = p.communicate()[0].decode('utf-8', 'ignore')
+	failed = 0
+	for ln in sshout.split('\n'):
+		fs = ln.split(':\t', 1)
+		if len(fs) == 1:
+			continue
+		prefix, ln = fs[0], fs[1].rstrip()
+		if prefix.endswith(':summary'):
+			prfx = prefix[:-8]
+			tasks[prfx].summary(prfx)
+		elif ':exit:' in prefix:
+			if not prefix.endswith(':exit:0'):
+				failed += 1
+		else:
+			ln = tasks[prefix].getln(ln)
+			if ln is None:
+				continue
+		print(f'{prefix}:\t{ln}')
+	if failed != 0:
+		err_exit(f'ERR-116: {failed} command(s) failed!')
+	if p.returncode != 0:
+		err_exit(f'ERR-101: ssh failed with code {p.returncode}!')
+
+
+if __name__ == '__main__':
+	main()

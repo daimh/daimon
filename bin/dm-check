@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+set -Eeufo pipefail
+trap "exit 1" TERM
+function helpme {
+	if [ $# -gt 0 ]
+	then
+		echo -e "$1" 1>&2
+	else
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220605
+	fi
+	kill -s TERM -- -$(cut -d ' ' -f 5 /proc/$$/stat)
+}
+function readable_time {
+	if [ -f $1 ]
+	then
+		let Ts=$(stat -c %Y $1)
+	else
+		Ts=0
+	fi
+	let Ts=$(date +%s)-$Ts || :
+	if [[ Ts -ge 86400 ]]
+	then
+		((Ts=Ts/86400))
+		echo ${Ts}d
+	elif [[ Ts -ge 3600 ]]
+	then
+		((Ts=Ts/3600))
+		echo ${Ts}h
+	elif [[ Ts -ge 60 ]]
+	then
+		((Ts=Ts/60))
+		echo ${Ts}m
+	else
+		echo ${Ts}s
+	fi
+}
+function report_then_quit {
+	CutFrom=$1
+	[ "$Report" != "JSON" ] || echo '{ "version":"1.0", "alerts": {'
+	! ((Row=0))
+	find . -type f -name diff-count | sort | while read F;
+	do
+		Cnt=$(cat $F)
+		[ -n "$Cnt" -a "$Cnt" != "0" ] || continue
+		Task="$(realpath -s ${F::-11} |cut -c $CutFrom-)"
+		if [ "$Report" = "TXT" ]
+		then
+			[ $Row != 0 ] || echo -e "Count\tTime\tTask"
+			Tm=$(readable_time ${F::-11}/diff-previous)
+			echo -e "$Cnt\t$Tm\t$Task"
+		elif [ "$Report" = "JSON" ]
+		then
+			[ $Row -eq 0 ] || echo ","
+			Since=$(date -u -Iseconds -d @$(stat -c %Y ${F::-11}/diff-previous))
+			Diff=$(base64 -w 0 $(echo $F | sed -e 's/-count$/-current/') )
+			echo -e "\"$Task\": {\"since\":\"$Since\", \"count\":$Cnt, \"diff\":\"$Diff\"}"
+		else
+			helpme "ERR-103: unsupported report format"
+		fi
+		((Row+=1))
+	done
+	[ "$Report" != "JSON" ] || echo '}}'
+	exit
+}
+All=NO
+Report=NO
+Ignore=NO
+OptShort="hvarji"
+OptLong="help,version,all,report,json-report,ignore-exitcode"
+Opts=$(getopt -o $OptShort --long $OptLong -n "$(basename $0)" -- "$@")
+eval set -- "$Opts"
+while [ $# -gt 0 ]
+do
+	case "$1" in
+#HELPME_START
+#SYNOPSIS
+#	dm-check [OPTION]...
+#EXAMPLE
+#	cd /opt/daimon/var; dm-check
+#DESCRIPTION
+		-h | --help)	#print help information
+			helpme ;;
+		--version)	#print version
+			helpme 20221122 ;;
+		-v )	#verbose output
+			set -x
+			shift ;;
+		-a | --all)	#check all tasks, regardless of current directory
+			All=YES
+			shift ;;
+		-r | --report)	#print report with tab-delimited format
+			Report=TXT
+			shift ;;
+		-j | --json-report)	#print report with json format
+			Report=JSON
+			shift ;;
+		-i | --ignore--exitcode)	#ignore out-exitcode to override the standard file
+			Ignore=YES
+			shift ;;
+		--)
+			shift
+			break ;;
+		*)
+			break ;;
+#AUTHOR
+#	Manhong Dai, MNI, U of Michigan
+#COPYRIGHT
+#	Copyright © 2002-2023 University of Michigan. MIT License
+#HELPME_END
+	esac
+done
+DaimonConf=/etc/daimon.conf
+. $DaimonConf || helpme "ERR-100: Configuration file $DaimonConf is missing"
+[ -n "$DaimonVar" ] || helpme "ERR-101: DaimonVar is not defined in the configuration file $DaimonConf"
+if [ "$All" = "YES" ]
+then
+	cd $DaimonVar
+elif [[ $PWD != $DaimonVar* ]]
+then
+	helpme "ERR-102: cd to any directory under $DaimonVar at first, or use '-a'"
+fi
+CutFrom=$(echo $DaimonVar/ | wc -c)
+[ "$Report" = "NO" ] || report_then_quit $CutFrom
+for f in $(find $* -type d | sort)
+do
+	[ -f $f/lock ] || continue
+	[ -f $f/diff-count ] || continue
+	! diff -q $f/diff-count <(echo 0) > /dev/null || continue
+	[ -f $f/out-current -a -f $f/out-standard ] || continue
+	Admin=", [a]dd, or [o]verride"
+	[ -w $f/lock -a -w $f/out-standard ] || Admin=""
+	Task=$(realpath -s $f | cut -c $CutFrom-)
+	while :
+	do
+		clear
+		Tempfile=$(mktemp)
+		if ! Md5sum=$(flock -xn $f/lock bash -c "md5sum $f/out-current; diff --color=always $f/out-current $f/out-standard > $Tempfile; :")
+		then
+			read -n 1 -r -p "$Task: is locked by another process. Next[q] or any key to retry? " Ans
+			case "$Ans" in
+				Q|q )
+					break;;
+				* )
+					continue;;
+			esac
+		fi
+		less -RKFXP "$Task" < $Tempfile
+		rm $Tempfile
+		[ "$Ignore" = "YES" ] || [ -z "$Admin" ] || diff -q <(echo 0) $f/out-exitcode &> /dev/null || Admin=""
+		read -n 1 -r -p "$Task: $(readable_time $f/diff-previous) ago, $(cat $f/diff-count) times. Next[q]$Admin? " Ans
+		echo
+		case "$Ans" in
+			A|a|O|o )
+				[ ! -z "$Admin" ] || continue
+				(
+					flock -xn 99 || exit 1
+					echo $Md5sum | md5sum -c | grep -qw OK || exit 1
+					Ts=$(date +%FT%T)
+					mv $f/diff-count $f/history-$Ts-norm
+					if [ "$Ans" = "o" -o "$Ans" = "O" ]
+					then
+						mv $f/out-standard $f/history-$Ts-standard
+						rm -f $f/out-standard.*
+						cp $f/out-current $f/out-standard
+					else
+						for ((i=0; ; i++))
+						do
+							[ -f $f/out-standard.$i ] || break
+						done
+						cp $f/out-current $f/out-standard.$i
+					fi
+					echo 0 > $f/diff-count
+				) 99> $f/lock && break || continue
+				;;
+			Q|q )
+				break
+				;;
+		esac
+	done
+	echo
+done
