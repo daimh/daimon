@@ -307,13 +307,11 @@ class Storcli(Task):
 				for row in range(5):
 					print('\t'.join([slot_sns[col*5 + row] for col in (range(4)) if col*5 + row < len(slot_sns)]))
 	def println(self, prefix, ln):
-		if ln.startswith('RAID:STORCLI:	iBBU'):
+		if ln.startswith('Next Patrol Read launch = '):
 			pass
-		elif ln.startswith('RAID:STORCLI:\tNext Patrol Read launch = '):
+		elif ln.startswith('Next Consistency check launch = '):
 			pass
-		elif ln.startswith('RAID:STORCLI:\tNext Consistency check launch = '):
-			pass
-		elif ln.startswith('RAID:STORCLI:\tNext Battery Learn = '):
+		elif ln.startswith('Next Battery Learn = '):
 			pass
 		elif ln.startswith('ROC temperature(Degree Celsius) = '):
 			pass
@@ -329,19 +327,19 @@ class Storcli(Task):
 				if tmp <= self.temperature: ln = ln.replace(search.group(0), ' OK ')
 				if tmp <= self.temperature: ln = ln[:search.span()[0]] + ' OK'
 			print(f'{prefix}:\t{ln}')
-#		elif ' Optl  Y ' in ln or ' Optl  N ' in ln:
-#			replace_with = ' Optl  # '
-#			print(ln.replace(' Optl  Y ', replace_with).replace(' Optl  N ', replace_with))
 		else:
 			if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
 				self.hdds.append([ln])
 			elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
 				self.hdds[-1].append(ln)
 			elif len(ln) == 76:
-				if ln[23:36] == ' DRIVE Onln  ' and ln[36] in ['Y', 'N']:
+				if ln[23:35] == ' DRIVE Onln ' and ln[36] in ['Y', 'N']:
 					ln = ln[:36] + '#' + ln[37:]
 				elif ln[11:16] in [' GHS ', ' DHS '] and ln[73:] in ['U  ', 'D  ', 'T  ']:
 					ln = ln[:73] + '#  '
+			elif len(ln) == 78:
+				if ln[23:28] == ' RAID' and ln[30:36] == ' Optl ' and ln[37] in ['Y', 'N']:
+					ln = ln[:37] + '#' + ln[38:]
 			elif len(ln) == 81:
 				if ln[11:16] in [' GHS ', ' DHS '] and ln[73:] in ['U  -    ', 'D  -    ', 'T  -    ']:
 					ln = ln[:73] + '#  -    '
