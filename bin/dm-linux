@@ -200,15 +200,19 @@ class Md5sum(Task):
 	def println(self, prefix, ln):
 		print(f'{prefix}:\t{ln}')
 
-class TimeOffset(Task):
+class AllowedTimeOffset(Task):
+	option = 'o'
 	helpmsg = "allowed time offset in seconds"
 	metavar = 'SECONDS'
 	def __init__(self, prefix, param):
-		self.now = int(time.time())
 		self.check = int(param)
-		self.cmds = [f'date +%s | sed -e "s/^/{prefix}:\t/"']
+		now = int(time.time())
+		self.cmds = [
+			f'date "+%s - {now}" | sed -e "s/^/{prefix}:\t/"',
+		]
 	def println(self, prefix, ln):
-		diff = int(ln) - self.now
+		fs = [int(s) for s in ln.split(' - ')]
+		diff = fs[0] - fs[1]
 		if diff < self.check: return
 		print(f'{prefix}:\t{diff}')
 
@@ -219,8 +223,8 @@ class Sysinfo(Task):
 			f'[ -f /proc/mdstat ] && cat /proc/mdstat | sed -e "s/^/{prefix}:\tMDSTAT:\t/"',
 			f'[ -f /proc/drbd ] && grep " cs:" /proc/drbd | sed -e "s/^/{prefix}:\tDRBD:\t/"',
 			f'ip a | grep -v valid_lft | sed -e "s/^/{prefix}:\tIP:\t/"',
-			f'which ipmitool &>/dev/null && ipmitool sdr 2>&1 | cut -d "|" -f 1,3 |grep -vEw "ok$|ns$" | sed -e "s/^/{prefix}:\tIPMITOOL:\t/" ',
-			f'which lvdisplay &> /dev/null && lvdisplay -C 2>&1 | sed -e "s/^/{prefix}:\tLVDISPLAY:\t/"',
+			f'if which ipmitool &>/dev/null; then ipmitool sdr 2>&1 | cut -d "|" -f 1,3 |grep -vEw "ok$|ns$" | sed -e "s/^/{prefix}:\tIPMITOOL:\t/"; fi',
+			f'if which lvdisplay &> /dev/null; then lvdisplay -C 2>&1 | sed -e "s/^/{prefix}:\tLVDISPLAY:\t/"; fi',
 		]
 	def println(self, prefix, ln):
 		if ln.startswith('MDSTAT:\t      bitmap:'):
@@ -228,7 +232,7 @@ class Sysinfo(Task):
 		print(f'{prefix}:\t{ln}')
 
 class Areca(Task):
-	helpmsg = "areca cli64 output"
+	helpmsg = "areca cli64 for Areca raid card"
 	metavar = 'TEMPERATURE or TEMPERATURE:60-bay'
 	def __init__(self, prefix, param):
 		fs = param.split(':')
@@ -243,7 +247,7 @@ class Areca(Task):
 			idx = ln.rindex(': ') + 2
 			if int(ln[idx:ln.index(' ', idx)]) >= self.temperature:
 				print(f'{prefix}:\t{ln}')
-		elif ln.startswith('[Controller H/W Monitor]'):
+		elif ln.startswith('[Controller H/W Monitor]') or ln.startswith('CLI> The Hardware Monitor Information'):
 			self.printit = False
 		elif ln.startswith('CLI>'):
 			print(f'{prefix}:\t{ln}')
@@ -252,7 +256,7 @@ class Areca(Task):
 			print(f'{prefix}:\t{ln}')
 
 class Megacli(Task):
-	helpmsg = "megacli output"
+	helpmsg = "megacli for LSI raid card"
 	metavar = 'TEMPERATURE'
 	def __init__(self, prefix, param):
 		if param[-1] != 'C': err_exit('ERR-105: --megacli needs a temperature alert threshold endswith "C", such as "--megacli 50C"')
@@ -265,7 +269,7 @@ class Megacli(Task):
 			print(f'{prefix}:\t{ln}')
 
 class Storcli(Task):
-	helpmsg = "storcli output"
+	helpmsg = "storcli for LSI raid card"
 	metavar = 'TEMPERATURE or TEMPERATURE:60-bay'
 	def __init__(self, prefix, param):
 		self.hdds = []
@@ -325,25 +329,24 @@ class Storcli(Task):
 				if tmp <= self.temperature: ln = ln.replace(search.group(0), ' OK ')
 				if tmp <= self.temperature: ln = ln[:search.span()[0]] + ' OK'
 			print(f'{prefix}:\t{ln}')
-#		elif (' DHS ' in ln or ' GHS ' in ln) and (ln.endswith(' D  -') or ln.endswith(' T  -') or ln.endswith('U  -')):
-#				print(ln[:-5], ' #  #', sep='')
-#		elif (' DHS ' in ln or ' GHS ' in ln) and (ln.endswith(' D') or ln.endswith(' T') or ln.endswith(' U')):
-#				print(ln[:-2], ' #', sep='')
-#		elif ' DRIVE  Onln  Y ' in ln or ' DRIVE  Onln  N ' in ln:
-#			replace_with = ' DRIVE  Onln  # '
-#			print(ln.replace(' DRIVE  Onln  Y ', replace_with).replace(' DRIVE  Onln  N ', replace_with))
-#		elif ' DRIVE Onln  Y ' in ln or ' DRIVE Onln  N ' in ln:
-#			replace_with = ' DRIVE Onln  # '
-#			print(ln.replace(' DRIVE Onln  Y ', replace_with).replace(' DRIVE Onln  N ', replace_with))
 #		elif ' Optl  Y ' in ln or ' Optl  N ' in ln:
 #			replace_with = ' Optl  # '
 #			print(ln.replace(' Optl  Y ', replace_with).replace(' Optl  N ', replace_with))
 		else:
-			print(f'{prefix}:\t{ln}')
 			if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
 				self.hdds.append([ln])
 			elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
 				self.hdds[-1].append(ln)
+			elif len(ln) == 76:
+				if ln[23:36] == ' DRIVE Onln  ' and ln[36] in ['Y', 'N']:
+					ln = ln[:36] + '#' + ln[37:]
+				elif ln[11:16] in [' GHS ', ' DHS '] and ln[73:] in ['U  ', 'D  ', 'T  ']:
+					ln = ln[:73] + '#  '
+			elif len(ln) == 81:
+				if ln[11:16] in [' GHS ', ' DHS '] and ln[73:] in ['U  -    ', 'D  -    ', 'T  -    ']:
+					ln = ln[:73] + '#  -    '
+			print(f'{prefix}:\t{ln}')
+				
 def get_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("host", help="host", metavar="HOST")
@@ -363,8 +366,8 @@ def set_args_default(args):
 		args.md5sum = Md5sum.FILES
 	else:
 		args.md5sum = Md5sum.FILES + args.md5sum
-	if args.timeoffset is None:
-		args.timeoffset = ['10']
+	if args.allowedtimeoffset is None:
+		args.allowedtimeoffset = ['10']
 
 def main():
 	args = get_args()
@@ -384,13 +387,13 @@ def main():
 	for prefix in sorted(tasks.keys()):
 		cmds += tasks[prefix].cmds
 	p = subprocess.Popen(["ssh", "-o", "loglevel=error", "-np", str(args.port), args.host, "; ".join(cmds)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-	sshout = p.communicate()[0]
-	if p.returncode != 0: err_exit('ERR-101: ssh failed! output is\n%s' % sshout)
-	for ln in sshout.decode('utf-8', 'ignore').rstrip().split('\n'):
+	sshout = p.communicate()[0].decode('utf-8', 'ignore').rstrip()
+	if p.returncode != 0:
+		err_exit(f'ERR-101: ssh failed! output is\n{sshout}')
+	for ln in sshout.split('\n'):
 		idx = ln.find(':\t')
 		if idx == -1: continue
 		prefix = ln[:idx]
-		task = tasks[prefix]
-		task.println(prefix, ln[len(prefix)+2:])
+		tasks[prefix].println(prefix, ln[len(prefix)+2:])
 
 if __name__ == '__main__': main()

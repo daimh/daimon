@@ -58,7 +58,7 @@ do
 		if ! flock -xn 99 
 		then
 			clear
-			read -n 1 -r -p "$f is locked, press ENTER to continue" 
+			read -n 1 -r -p "$f is locked, press any key to continue" 
 			exit
 		fi
 		[ ! -f $f/diff_count ] && exit

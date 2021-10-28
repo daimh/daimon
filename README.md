@@ -1,6 +1,12 @@
-# daimon, the simplest monitoring tool
+# daimon, the simplest but powerful and flexible monitoring tool
 
 bin/daimon runs whatever command after --, and then compares its output with standard file(s) under var directory. If the output is different and the difference is new, daimon will send out email alerts.
+
+bin/dm-linux monitors storage usage, CPU load percentage, internal temperature, drive SMART attributes, file changes, directory permissions, LSI raid and Areca raid. It also supports custom commands to be flexible.
+
+bin/dm-ups supports two APC ups models. Feel free to add new models and send me a pull request.
+
+We has been using daimon to monitor UPS status, Linux, and even LSI raid card in Windows with ssh for a decade.
 
 ## Installation
 ```
@@ -10,10 +16,14 @@ ln -s /opt/daimon/etc/daimon.conf /etc
 ```
 Then check out file etc/crontab.example, and add /opt/daimon/bin to your PATH
 
-## Administration
+## Usage
 ```
+dm-linux localhost -d /:99
+dm-linux localhost -d /:1
+daimon -t test/localhost -- dm-linux localhost -d /:99
+daimon -t test/localhost -- dm-linux localhost -d /:1
 dm-report
-cd /opt/daimon/var
+cd /opt/daimon/var/test/localhost
 dm-check
 ```
 
