@@ -4,7 +4,7 @@ bin/daimon runs whatever command after --, and then compares its output with sta
 
 bin/dm-linux monitors storage usage, CPU load percentage, internal temperature, drive SMART attributes, file changes, directory permissions, LSI raid and Areca raid. It also supports custom commands to be flexible.
 
-bin/dm-ups supports two APC ups models. Feel free to add new models and send me a pull request.
+bin/dm-ups supports two APC UPS models. Feel free to add new models and send me a pull request.
 
 We has been using daimon to monitor UPS status, Linux, and even LSI raid card in Windows with ssh for a decade.
 
