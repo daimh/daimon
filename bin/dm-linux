@@ -336,9 +336,11 @@ class Storcli(Task):
 				ln = ln[:73] + '#  '
 			print(f'{prefix}:\t{ln}')
 			return
-		if len(ln) == 78:
-			if ln[23:28] == ' RAID' and ln[30:36] == ' Optl ' and ln[37] in ['Y', 'N']:
+		if len(ln) in [77, 78] and ln[23:28] == ' RAID':
+			if ln[30:36] == ' Optl ' and ln[37] in ['Y', 'N']:
 				ln = ln[:37] + '#' + ln[38:]
+			elif ln[29:35] == ' Optl ' and ln[36] in ['Y', 'N']:
+					ln = ln[:36] + '#' + ln[38:]
 			print(f'{prefix}:\t{ln}')
 			return
 		if len(ln) == 81:
