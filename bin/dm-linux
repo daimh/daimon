@@ -282,6 +282,7 @@ class Storcli(Task):
 			f'/opt/MegaRAID/storcli/storcli /call show all| grep -iv "Date/Time" | sed -e "s/^/{prefix}:\t/"',
 			f'/opt/MegaRAID/storcli/storcli /call /eall /sall show all | sed -e "s/^/{prefix}:\t/"'
 		]
+		self.BT = 0
 	def __del__(self):
 		re_slot = re.compile('Drive /c([0-9]+)/e([0-9]+)/s([0-9]+) Device attributes :')
 		sns_each_card_enc = {}
@@ -307,6 +308,10 @@ class Storcli(Task):
 				for row in range(5):
 					print('\t'.join([slot_sns[col*5 + row] for col in (range(4)) if col*5 + row < len(slot_sns)]))
 	def println(self, prefix, ln):
+		if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
+			self.hdds.append([ln])
+		elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
+			self.hdds[-1].append(ln)
 		if ln.startswith('Next Patrol Read launch = '): return
 		if ln.startswith('Next Consistency check launch = '): return
 		if ln.startswith('Next Battery Learn = '): return
@@ -329,29 +334,34 @@ class Storcli(Task):
 				if tmp <= self.temperature: ln = ln[:search.span()[0]] + ' OK'
 			print(f'{prefix}:\t{ln}')
 			return
-		if len(ln) == 76:
-			if ln[23:35] == ' DRIVE Onln ' and ln[36] in ['Y', 'N']:
-				ln = ln[:36] + '#' + ln[37:]
-			elif ln[11:16] in [' GHS ', ' DHS '] and ln[73:] in ['U  ', 'D  ', 'T  ']:
-				ln = ln[:73] + '#  '
+		if self.BT == 0 and ln.startswith('DG Arr Row EID:Slot DID Type '):
+			print(f'{prefix}:\t{ln}')
+			self.BT = 1
+			return
+		if self.BT == 1:
+			if not ln.startswith('-------'): err_exit('ERR-108: unexpected line in storcli')
+			print(f'{prefix}:\t{ln}')
+			self.BT = 2
+			return
+		if self.BT == 2:
+			ln = ln.replace(' Optl  Y ', ' Optl  # ')
+			ln = ln.replace(' Optl  N ', ' Optl  # ')
+			ln = ln.replace(' Onln  Y ', ' Onln  # ')
+			ln = ln.replace(' Onln  N ', ' Onln  # ')
+			print(f'{prefix}:\t{ln}')
+			if ln.startswith('-------'): self.BT = 0
+			return
+		if (
+			' GHS ' in ln or
+			' DHS ' in ln
+		) and  (
+			ln.endswith('D  -    ') or
+			ln.endswith('T  -    ') or
+			ln.endswith('U  -    ')
+		):
+			ln = ln[:-8] + '#  -    '
 			print(f'{prefix}:\t{ln}')
 			return
-		if len(ln) in [77, 78] and ln[23:28] == ' RAID':
-			if ln[30:36] == ' Optl ' and ln[37] in ['Y', 'N']:
-				ln = ln[:37] + '#' + ln[38:]
-			elif ln[29:35] == ' Optl ' and ln[36] in ['Y', 'N']:
-					ln = ln[:36] + '#' + ln[38:]
-			print(f'{prefix}:\t{ln}')
-			return
-		if len(ln) == 81:
-			if ln[11:16] in [' GHS ', ' DHS '] and ln[73:] in ['U  -    ', 'D  -    ', 'T  -    ']:
-				ln = ln[:73] + '#  -    '
-			print(f'{prefix}:\t{ln}')
-			return
-		if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
-			self.hdds.append([ln])
-		elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
-			self.hdds[-1].append(ln)
 		print(f'{prefix}:\t{ln}')
 				
 def get_args():
