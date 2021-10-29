@@ -334,6 +334,14 @@ class Storcli(Task):
 				if tmp <= self.temperature: ln = ln[:search.span()[0]] + ' OK'
 			print(f'{prefix}:\t{ln}')
 			return
+		if re.compile('.* [DG]HS .* [DTU]  -    $').search(ln) is not None:
+			ln = ln[:-8] + '#  -    '
+			print(f'{prefix}:\t{ln}')
+			return
+		if re.compile('.* [DG]HS .* [DTU]  $').search(ln) is not None:
+			ln = ln[:-3] + '#  '
+			print(f'{prefix}:\t{ln}')
+			return
 		if self.BT == 0 and ln.startswith('DG Arr Row EID:Slot DID Type '):
 			print(f'{prefix}:\t{ln}')
 			self.BT = 1
@@ -350,17 +358,6 @@ class Storcli(Task):
 			ln = ln.replace(' Onln  N ', ' Onln  # ')
 			print(f'{prefix}:\t{ln}')
 			if ln.startswith('-------'): self.BT = 0
-			return
-		if (
-			' GHS ' in ln or
-			' DHS ' in ln
-		) and  (
-			ln.endswith('D  -    ') or
-			ln.endswith('T  -    ') or
-			ln.endswith('U  -    ')
-		):
-			ln = ln[:-8] + '#  -    '
-			print(f'{prefix}:\t{ln}')
 			return
 		print(f'{prefix}:\t{ln}')
 				
