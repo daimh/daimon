@@ -21,7 +21,9 @@ function helpme {
 	PGID=$(cut -d ' ' -f 5 /proc/$$/stat)
 	kill -s TERM -- -$PGID
 }
-OPTS=$(getopt -o hvm: --long help,verbose,md5sum: -n "$(basename $0)" -- "$@")
+OPT_SHORT="hvm:"
+OPT_LONG="help,verbose,md5sum:"
+OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
 eval set -- "$OPTS"
 while :
 do
@@ -36,7 +38,7 @@ do
 		-v | --verbose)	#optional, verbose
 			set -x
 			shift ;;
-		-m | --md5sum)	#=HASH, override 'out_standard' if the diff file has a md5sum of HASH.
+		-m | --md5sum)	#HASH, override 'out_standard' if the diff file has a md5sum of HASH.
 			MD5SUM=$2
 			shift 2 ;;
 		--)

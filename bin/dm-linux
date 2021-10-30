@@ -101,22 +101,20 @@ class DfCheck(Task):
 				self.cmds.append(f'df -Pt tmpfs |tail -n +2 | grep -v /run/user/ | sed -e "s/^/{prefix}:\t/"')
 			else:
 				self.cmds.append(f'mountpoint {mp} &> /dev/null && df -P {mp} | tail -n +2 | sed -e "s/^/{prefix}:\t/"')
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		if ln == 'BEGIN':
-			print(f'DFCHECK:\tSize\tAvail\tUsed%\tThreshold%\tMounted on\tFilesystem')
-			return
+			return f'Size\tAvail\tUsed%\tThreshold%\tMounted on\tFilesystem'
 		fs = ln.split()
 		size = int(fs[1])/1048576
 		used = int(fs[4][:-1])
 		avail = int(fs[3])/1048576
 		if used >= self.check[0] or (len(self.check) == 2 and size < self.check[1]):
-			print('%s:\t%dG\t%dG\t%d%%\t%d%%\t%s\t%s' % (prefix, size, avail, used, self.check[0], fs[5], fs[0]))
-		elif len(self.check) == 1:
-			print('%s:\t%dG\tOK\t\t\t%s\t%s' % (prefix, size, fs[5], fs[0]))
-		elif len(self.check) == 2:
-			print('%s:\tOK\tOK\t\t\t%s\t%s' % (prefix, fs[5], fs[0]))
-		else:
-			err_exit('ERR-107: %s' % ln)
+			return '%dG\t%dG\t%d%%\t%d%%\t%s\t%s' % (size, avail, used, self.check[0], fs[5], fs[0])
+		if len(self.check) == 1:
+			return '%dG\tOK\t\t\t%s\t%s' % (size, fs[5], fs[0])
+		if len(self.check) == 2:
+			return 'OK\tOK\t\t\t%s\t%s' % ( fs[5], fs[0])
+		err_exit('ERR-107: %s' % ln)
 
 class SmartCheck(Task):
 	option = 's'
@@ -130,17 +128,19 @@ class SmartCheck(Task):
 		self.cmds = []
 		for drv in fs[0].split(','):
 			self.cmds.append(f'smartctl -iH /dev/{drv} | tail -n +4 | sed -e "s/^/{prefix}:\t{drv}:\t/"')
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		for key in self.check:
 			if ln[ln.index(':\t')+2:].startswith(f'{key}:'): return
-		print(f'{prefix}:\t{ln}')
+		return ln
 
 class Dmesg(Task):
 	option = 'm'
 	helpmsg = 'Search a list of KEYWORDS in dmesg output'
 	metavar = 'KEYWORDS'
 	def __init__(self, prefix, param):
-		return [f'dmesg | grep -E "{param}" | sed -e "s/^/{prefix}:\t/"']
+		self.cmds = [f'dmesg | grep -E "{param}" | sed -e "s/^/{prefix}:\t/"']
+	def getln(self, ln):
+		return ln
 
 class LoadCheck(Task):
 	option = 'l'
@@ -149,13 +149,13 @@ class LoadCheck(Task):
 	def __init__(self, prefix, param):
 		self.check = float(param)
 		self.cmds = [f'uptime | sed -e "s/^/{prefix}:\t/"']
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		loads = [float(s) for s in ln.split('load average: ')[1].split(', ')]
 		if self.check >= 0:
 			if max(loads) >= self.check:
-				print(f'{prefix}:\t+{self.check}')
+				return f'+{self.check}'
 		elif min(loads) <= -self.check:
-				print(f'{prefix}:\t{self.check}')
+				return f'{self.check}'
 
 class Command(Task):
 	option = 'c'
@@ -163,8 +163,8 @@ class Command(Task):
 	metavar = 'COMMAND'
 	def __init__(self, prefix, param):
 		self.cmds = [f'{param} | sed -e "s/^/{prefix}:\t/"' ]
-	def println(self, prefix, ln):
-		print(f'{prefix}:\t{ln}')
+	def getln(self, ln):
+		return ln
 
 class Temperature(Task):
 	option = 't'
@@ -173,11 +173,11 @@ class Temperature(Task):
 	def __init__(self, prefix, param):
 		self.check = int(param)
 		self.cmds = [f"sensors | sed -e 's/^/{prefix}:\t/'"]
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		search = re.compile('\+[0-9]+\.[0-9]').search(ln)
 		if search is None: return
 		if int(float(search.group(0)[1:])) <= self.check: return
-		print(f'{prefix}:\t{ln}')
+		return ln
 
 class Stat(Task):
 	helpmsg = "stat permission and owner of FILES"
@@ -186,8 +186,8 @@ class Stat(Task):
 		self.cmds = []
 		for fl in param.split(','):
 			self.cmds.append(f"stat -c '%A\t%i\t%U\t%G\t%n' {fl} | sed -e 's/^/{prefix}:\t/'")
-	def println(self, prefix, ln):
-		print(f'{prefix}:\t{ln}')
+	def getln(self, ln):
+		return ln
 
 class Md5sum(Task):
 	helpmsg = "md5sum of FILES"
@@ -197,8 +197,8 @@ class Md5sum(Task):
 		self.cmds = []
 		for fl in param.split(','):
 			self.cmds.append(f"md5sum {fl} | sed -e 's/^/{prefix}:\t/'")
-	def println(self, prefix, ln):
-		print(f'{prefix}:\t{ln}')
+	def getln(self, ln):
+		return ln
 
 class AllowedTimeOffset(Task):
 	option = 'o'
@@ -210,11 +210,11 @@ class AllowedTimeOffset(Task):
 		self.cmds = [
 			f'date "+%s - {now}" | sed -e "s/^/{prefix}:\t/"',
 		]
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		fs = [int(s) for s in ln.split(' - ')]
 		diff = fs[0] - fs[1]
 		if diff < self.check: return
-		print(f'{prefix}:\t{diff}')
+		return f'{diff}'
 
 class Sysinfo(Task):
 	def __init__(self, prefix, param):
@@ -226,10 +226,9 @@ class Sysinfo(Task):
 			f'if which ipmitool &>/dev/null; then ipmitool sdr 2>&1 | cut -d "|" -f 1,3 |grep -vEw "ok$|ns$" | sed -e "s/^/{prefix}:\tIPMITOOL:\t/"; fi',
 			f'if which lvdisplay &> /dev/null; then lvdisplay -C 2>&1 | sed -e "s/^/{prefix}:\tLVDISPLAY:\t/"; fi',
 		]
-	def println(self, prefix, ln):
-		if ln.startswith('MDSTAT:\t      bitmap:'):
-			return
-		print(f'{prefix}:\t{ln}')
+	def getln(self, ln):
+		if ln.startswith('MDSTAT:\t      bitmap:'): return
+		return ln
 
 class Areca(Task):
 	helpmsg = "areca cli64 for Areca raid card"
@@ -242,18 +241,20 @@ class Areca(Task):
 		cli64 = '%s\nquit' % '\n'.join(['set curctrl=%d\nhw info\nvsf info\ndisk info' % (idx+1) for idx in range(int(fs[1]))])
 		self.cmds = [f'echo -e "{cli64}" | cli64 |col -b | sed -e "s/^/{prefix}:\t/"']
 		self.printit = True
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		if "Ctrl Temperature" in ln or "Controller Temp." in ln:
 			idx = ln.rindex(': ') + 2
 			if int(ln[idx:ln.index(' ', idx)]) >= self.temperature:
-				print(f'{prefix}:\t{ln}')
-		elif ln.startswith('[Controller H/W Monitor]') or ln.startswith('CLI> The Hardware Monitor Information'):
+				return ln
+			return
+		if ln.startswith('[Controller H/W Monitor]') or ln.startswith('CLI> The Hardware Monitor Information'):
 			self.printit = False
-		elif ln.startswith('CLI>'):
-			print(f'{prefix}:\t{ln}')
+			return
+		if ln.startswith('CLI>'):
 			self.printit = True
-		elif self.printit:
-			print(f'{prefix}:\t{ln}')
+			return ln
+		if self.printit:
+			return ln
 
 class Megacli(Task):
 	helpmsg = "megacli for LSI raid card"
@@ -264,9 +265,9 @@ class Megacli(Task):
 		self.cmds = [
 			f'/opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL | sed -e "s/^/{prefix}:\t/"',
 		]
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		if not ln.startswith('Drive Temperature :') or int(ln[19:ln.index('C', 19)]) >= self.temperature:
-			print(f'{prefix}:\t{ln}')
+			return ln
 
 class Storcli(Task):
 	helpmsg = "storcli for LSI raid card"
@@ -282,7 +283,7 @@ class Storcli(Task):
 			f'/opt/MegaRAID/storcli/storcli /call show all| grep -iv "Date/Time" | sed -e "s/^/{prefix}:\t/"',
 			f'/opt/MegaRAID/storcli/storcli /call /eall /sall show all | sed -e "s/^/{prefix}:\t/"'
 		]
-		self.BT = 0
+		self.ln_bt_check = 0
 	def __del__(self):
 		re_slot = re.compile('Drive /c([0-9]+)/e([0-9]+)/s([0-9]+) Device attributes :')
 		sns_each_card_enc = {}
@@ -307,7 +308,7 @@ class Storcli(Task):
 				slot_sns = [sn[0] for sl, sn in sorted(slot_sns.items())]
 				for row in range(5):
 					print('\t'.join([slot_sns[col*5 + row] for col in (range(4)) if col*5 + row < len(slot_sns)]))
-	def println(self, prefix, ln):
+	def getln(self, ln):
 		if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
 			self.hdds.append([ln])
 		elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
@@ -318,13 +319,10 @@ class Storcli(Task):
 		if ln.startswith('ROC temperature(Degree Celsius) = '): return
 		if ln.startswith('iBBU '):
 			ln =' '.join(ln.split()[:2])
-			print(f'{prefix}:\t{ln}')
-			return
+			return ln
 		if ln.startswith('Drive Temperature ='):
-			if 'N/A' in ln or 'C' not in ln:
-				print(f'{prefix}:\t{ln}')
-			elif int(ln.split('=')[1].split('C')[0]) >= self.temperature:
-				print(f'{prefix}:\t{ln}')
+			if 'N/A' in ln or 'C' not in ln or int(ln.split('=')[1].split('C')[0]) >= self.temperature:
+				return ln
 			return
 		if ln.startswith('CVPM0'):
 			search = re.compile(' [0-9]+C ').search(ln)
@@ -332,34 +330,28 @@ class Storcli(Task):
 				tmp  = int(search.group(0)[1:-2])
 				if tmp <= self.temperature: ln = ln.replace(search.group(0), ' OK ')
 				if tmp <= self.temperature: ln = ln[:search.span()[0]] + ' OK'
-			print(f'{prefix}:\t{ln}')
-			return
+			return ln
 		if re.compile('.* [DG]HS .* [DTU]  -    $').search(ln) is not None:
-			ln = ln[:-8] + '#  -    '
-			print(f'{prefix}:\t{ln}')
-			return
+			return ln[:-8] + '#  -    '
 		if re.compile('.* [DG]HS .* [DTU]  $').search(ln) is not None:
-			ln = ln[:-3] + '#  '
-			print(f'{prefix}:\t{ln}')
-			return
-		if self.BT == 0 and ln.startswith('DG Arr Row EID:Slot DID Type '):
-			print(f'{prefix}:\t{ln}')
-			self.BT = 1
-			return
-		if self.BT == 1:
+			return ln[:-3] + '#  '
+		if self.ln_bt_check == 0 and ln.startswith('DG Arr Row EID:Slot DID Type '):
+			self.ln_bt_check = 1
+			return ln
+		if self.ln_bt_check == 1:
 			if not ln.startswith('-------'): err_exit('ERR-108: unexpected line in storcli')
-			print(f'{prefix}:\t{ln}')
-			self.BT = 2
-			return
-		if self.BT == 2:
-			ln = ln.replace(' Optl  Y ', ' Optl  # ')
-			ln = ln.replace(' Optl  N ', ' Optl  # ')
-			ln = ln.replace(' Onln  Y ', ' Onln  # ')
-			ln = ln.replace(' Onln  N ', ' Onln  # ')
-			print(f'{prefix}:\t{ln}')
-			if ln.startswith('-------'): self.BT = 0
-			return
-		print(f'{prefix}:\t{ln}')
+			self.ln_bt_check = 2
+			return ln
+		if self.ln_bt_check == 2:
+			if ln.startswith('-------'):
+				self.ln_bt_check = 0
+			else:
+				ln = ln.replace(' Optl  Y ', ' Optl  # ')
+				ln = ln.replace(' Optl  N ', ' Optl  # ')
+				ln = ln.replace(' Onln  Y ', ' Onln  # ')
+				ln = ln.replace(' Onln  N ', ' Onln  # ')
+			return ln
+		return ln
 				
 def get_args():
 	parser = argparse.ArgumentParser()
@@ -408,6 +400,8 @@ def main():
 		idx = ln.find(':\t')
 		if idx == -1: continue
 		prefix = ln[:idx]
-		tasks[prefix].println(prefix, ln[len(prefix)+2:])
+		ln = tasks[prefix].getln(ln[len(prefix)+2:])
+		if ln is None: continue
+		print(f'{prefix}:\t{ln}')
 
 if __name__ == '__main__': main()
