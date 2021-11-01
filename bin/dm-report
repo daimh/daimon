@@ -1,12 +1,5 @@
 #!/usr/bin/bash
-#20210312 modification caused by daisync/etc/config change
-#20200910 getopt
-#20190204 NODE DEST when "no log found"
-#20180604 time as first column
-#20180127 sort daisync output
-#20170824 running failed
-#20170817 diff exclude.lst
-#20170302 daisync is added
+#Author Manhong Dai, MNI, U of Michigan
 set -e
 trap "exit 1" TERM
 function helpme {

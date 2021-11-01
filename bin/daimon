@@ -1,41 +1,5 @@
 #!/usr/bin/bash
 #Author Manhong Dai, MNI, U of Michigan
-#20211027 github
-#20211001 bug fix
-#20210722 helpme
-#20210212 ERR-002
-#20210204 flock
-#20200627 return smallest diff file
-#20200622 history-abnm norm
-#20190725 fixed the new 'mail' command doesn't accept comma
-#20190110 typo fix
-#20190109 diff_count in initialization
-#20181011 remove some col -b
-#20181003 sleep random (0-10) seconds
-#20181001 pipefail and FINAL
-#20180922 strings -> col -b
-#20180321 rm diff-previous if it is normal
-#20180307 print initial output to console
-#20151118 some modification for old version of bash only
-#20150720 $@ -> "$@"
-#20150630 diff_count for kill
-#20160216 -n default 3
-#20141225 LAST -> FINAL
-#20141104 kill stuck previous process
-#20140312 '-n 0'
-#20140224 add 'exit status'
-#20131028 in case diff_count doesn't exist
-#20130926 always send alerts out if command failed
-#20130421 major update, not compatible with old versions
-#20130415 send current when it is back to normal 
-#20121005 send good news if it is back to normal
-#20120831 flock to, warn if failed
-#20120825 change CMD
-#20120822 multiple standard files
-#20120111 put 'missing configuration' behind '-h'
-#20120110 added '-d'.
-#20111202 
-#20110926 added dailog ussage type
 set -o pipefail
 set -e
 trap "exit 1" TERM

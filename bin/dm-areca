@@ -1,7 +1,5 @@
 #!/usr/bin/python
-#20211027	argparse
-#20181012	python 2->3
-#20180122	md5 to hashlib
+#Author Manhong Dai, MNI, U of Michigan
 import hashlib, http.client, argparse
 def get_args():
 	parser = argparse.ArgumentParser()

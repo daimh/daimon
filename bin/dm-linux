@@ -1,84 +1,5 @@
 #!/usr/bin/python
 #Author Manhong Dai, MNI, U of Michigan
-#20211027 MAJOR upgrade with python class and github release
-#20210907 60-bay
-#20210823 -l +/-
-#20210821 -l +/-
-#20210802 grep -vw ok/ns
-#20210719 ipmitool
-#20210603 move -c to the second position
-#20210311 removed --ignore, add --files
-#20210310 md5sum authorized_keys
-#20210106, storcli DHS D/U/T
-#20201025 --time 15 -> 20
-#20200826 60-bay fix
-#20200612 re-enabeld --gluster
-#20200609 move lvdisplay to the last command to make sure it has '(o)pen', IP
-#20200605 ssh banner
-#20200303 uptime
-#20200219 CVPM0 OK$
-#20191010 used >= nthr[0] -> used > nthr[0]
-#20190904 CVPM0
-#20190712 -L
-#20190710 CVPM02
-#20190619 uname, MEMINFO->SYSINFO
-#20190418 ls before df, because autofs show dash as fielsystem if it is unmounted due to timeout
-#20190208 retire drbd-overview
-#20190116 ignore-line
-#20190112 DRIVE Onln
-#20190109, no append in args for better consistency, bash -c in commands
-#20190108, "#" in output
-#20190104, fix temperature
-#20181207, storcli GHS D/U/T
-#20181114, generate 60-bay layout
-#20181113, T -
-#20181011, drbd not found
-#20181010, ignore in decode
-#20181009, 2>&1 in drbdoverview
-#20181003, 2>&1 in commands
-#20180921, re-enabled megacli
-#20180919, -T
-#20180622, removed gluster, 'type=int'
-#20180613, storcli GHS D/U
-#20180607, storcli GHS D/U
-#20180604, storcli modification
-#20180515, 'RAID:STORCLI:\tActive Operations = Consistency Check'
-#20180510, storcli iBBU
-#20180509, storcli and tmpfs
-#20180418, re.sub
-#20180417, Python 3
-#20180413, drbd-overview
-#20180409, TMPFS, storcli
-#Jan 22, 2018, df missing mountpoint
-#Aug 23, 2017, dfcheck, add SIZE-THRESHOLD and filesystem
-#Aug 07, 2017, umount /home; mount /home
-#Mar 14, 2017, Local Time in smartctl
-#Feb 06, 2017, mintor
-#Dec 23, 2016, -m
-#Nov 2, 2016, modified -d to handle automount, remove -l
-#Jun 20, 2016, unexpected output caused by 0.0.21
-#Jun 14, 2016, ssh stderr
-#Mar 22, 2016, DF printing
-#Feb 29, 2016, 100% df is fine
-#Jul 20, 2015, errexit instead of exception
-#Apr 20, 2015, default offset for time to 15
-#Jan 26, 2015, offset for time
-#Jan 12, 2015, time
-#Jun 20, 2014, minor change for areca temporature
-#Jun 20, 2014, add areca temporature
-#May 23, 2014, added lvdisplay
-#Mar 12, 2014, 'RAID:LSI:	  Check Consistency        : Running'
-#Feb 24, 2014, raise exception if ssh failed
-#Sep 13, 2013, LSI supports drive that has no temperature reading now
-#Aug 29, 2013, "-r drbd", "-c"
-#Aug 8, 2013, "disk info in areca"
-#Jul 19, 2013, "-r areca:N"
-#Jul 9, 2013, added '-p' to ssh to different port
-#Jul 3, 2013, Temperature in LSI; added '-n' to 'ssh'
-#Jun 3, 2013, add '-f /proc/mdstat'
-#Jan 21, 2013, add '-r' to check hardware raid
-#Sep 9, 2012, MDSTAT:	      [================>....]  check = 84.5% (2477136384/2930266432) finish=86.8min speed=87000K/sec
-#Sep 1, 2012, replace dm_storage with dm_linux
 import sys, subprocess, argparse, time, re
 def err_exit(msg):
 	print(msg, file=sys.stderr)
@@ -196,7 +117,7 @@ class Md5sum(Task):
 	def __init__(self, prefix, param):
 		self.cmds = []
 		for fl in param.split(','):
-			self.cmds.append(f"md5sum {fl} | sed -e 's/^/{prefix}:\t/'")
+			self.cmds.append(f"md5sum {fl} 2>&1 | sed -e 's/^/{prefix}:\t/'")
 	def getln(self, ln):
 		return ln
 

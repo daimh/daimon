@@ -1,10 +1,5 @@
 #!/usr/bin/python
-#20201012 --Output-Efficiency
-#20200711 --Next-Battery-Replacement-Date
-#20200709 optparse -> argparse
-#20200708 --ups-firmware
-#20181003 python2->3
-#20131213
+#Author Manhong Dai, MNI, U of Michigan
 import socket, sys, telnetlib, argparse
 def read_status(s, result):
 	idx = s.find(':')

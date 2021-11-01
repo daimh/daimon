@@ -1,14 +1,5 @@
 #!/usr/bin/bash
-#20210204 flock
-#20201012
-#20201009 md5sum
-#20201001 less -P
-#20200925 tput lines -> less -F
-#20200911 tput lines
-#20200616 for -> find
-#20181012 [ -> [[
-#20181003	
-#20180108
+#Author Manhong Dai, MNI, U of Michigan
 set -e
 trap "exit 1" TERM
 function helpme {
