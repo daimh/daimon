@@ -1,8 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #Author Manhong Dai, MNI, U of Michigan
 import hashlib, http.client, argparse
 def get_args():
 	parser = argparse.ArgumentParser()
+	parser.add_argument("-V", "--version", action='version', version='20220128')
 	parser.add_argument("-u", "--username", required=True)
 	parser.add_argument("-p", "--password", required=True)
 	parser.add_argument("areca")
@@ -30,7 +31,6 @@ def main():
 	respdig = KD(H(A1), noncebit)
 	base = 'Digest username="%s", realm="%s", nonce="%s", uri="%s", response="%s", qop=%s, nc=00000001, cnonce="%s"' % (args.username, realm, chal['nonce'], '/', respdig, chal['qop'], cnonce)
 	header = {'Authorization':base}
-	
 	cnn.request("GET", "/", None, header)
 	r1 = cnn.getresponse()
 	if r1.status != 200: raise 'err4 code is %d' % r1.status

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #Author Manhong Dai, MNI, U of Michigan
 import socket, sys, telnetlib, argparse
 def read_status(s, result):
@@ -19,6 +19,7 @@ def read_status(s, result):
 	result[key] = value
 def get_args_opts():
 	parser = argparse.ArgumentParser()
+	parser.add_argument("-V", "--version", action='version', version='20220128')
 	parser.add_argument("-u", "--username", required=True)
 	parser.add_argument("-p", "--password", required=True)
 	parser.add_argument("ups")

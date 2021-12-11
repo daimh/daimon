@@ -1,35 +1,40 @@
-#!/usr/bin/bash
-#Author Manhong Dai, MNI, U of Michigan
+#!/usr/bin/env bash
+set -euf
 set -o pipefail
-set -e
 trap "exit 1" TERM
 function helpme {
-	if [[ "$1" != "" ]]
+	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		cat /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | grep -e "	-\|^#" | grep -- "$(echo $OPT_SHORT | sed -e "s/://g" | sed -e "s/\(.\)/\t-\1 \\\|/g" | sed -e "s/$/^#$COMMAND\t\\\|^#[A-Z]/" )" | sed -e "s/^#$COMMAND\t/\t/; s/^#//" 1>&2
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220313
 	fi
 	PGID=$(cut -d ' ' -f 5 /proc/$$/stat)
 	kill -s TERM -- -$PGID
 }
-EMAIL=$USER
+CONFIG=/etc/daimon.conf
+. $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
+EMAIL=""
+TARGET=""
 let COUNT=1
 OPT_SHORT="hvt:m:n:"
-OPT_LONG="help,verbose,target:,mail:,count:"
+OPT_LONG="help,version,target:,mail:,count:"
 OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
 eval set -- "$OPTS"
-while :
+while [ $# -gt 0 ]
 do
 	case "$1" in
 #HELPME_START
-#SYNOPSIS:
+#SYNOPSIS
 #	daimon [OPTION]... -- CMD
-#EXAMPLE:
-#	daimon -t linux/host-a -- dm-linux host-a -d /:50
-		-h | --help)
+#EXAMPLE
+#	daimon -t linux/host-a -- dm-linux host-a -d 50
+#DESCRIPTION
+		-h | --help)	#print help information
 			helpme ;;
-		-v | --verbose)	#optional, verbose
+		--version)	#print version
+			helpme 20220312 ;;
+		-v )	#verbose output
 			set -x
 			shift ;;
 		-t | --target)	#target name
@@ -38,19 +43,32 @@ do
 		-m | --mail)	#alertee email addresses, seperated by comma
 			EMAIL=$(echo $2 | sed -e "s/,/ /g")
 			shift 2 ;;
-		-n | --count)	#send up to COUNT alerts for the same incident, default 1
-			let COUNT=$2 || helpme "ERR-101: -n needs a number"
+		-n | --count)	#send up to COUNT alerts for a new incident, default 1
+			let COUNT=$2 || helpme "ERR-101: -n needs a positive number"
 			shift 2 ;;
 		--)
 			shift 1 ;;
 		*)
 			break ;;
+#AUTHOR
+#	Manhong Dai, MNI, U of Michigan
+#COPYRIGHT
+#	Copyright © 2002-2022 University of Michigan. License GPLv3+: GNU
+#	GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+#	This is free software: you are free to change and redistribute it.
+#	There is NO WARRANTY, to the extent permitted by law.
 #HELPME_END
 	esac
 done
+if [ "$DAIMON_EMAIL" != "NO" ]
+then
+	set +u
+	[ -n "$EMAIL" ] || EMAIL=$MAILTO
+	[ -n "$EMAIL" ] || EMAIL=$USER
+	set -u
+	[ -n "$EMAIL" ] || helpme "ERR-102: -m needs an email address"
+fi
 CMD="$@"
-CONFIG=/etc/daimon.conf
-. $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
 [ -n "$DAIMON_HOME" ] || helpme "ERR-103: missing environment variable DAIMON_HOME in Configuration file $CONFIG"
 [ -d "$DAIMON_HOME" ] || helpme "ERR-104: $DAIMON_HOME is not a directory"
 [ -n "$TARGET" ] || helpme "ERR-105: TARGET is missing"
@@ -60,7 +78,7 @@ if [ ! -f $ID/out_standard ]
 then
 	mkdir -p $ID
 	rm -f $ID/diff_count
-	if ! bash -c "$CMD" &> $ID/out_current
+	if ! timeout 60 bash -c "$CMD" &> $ID/out_current
 	then 
 		cat $ID/out_current
 		echo 99999 > $ID/diff_count
@@ -68,7 +86,7 @@ then
 	fi
 	mv $ID/out_current $ID/out_standard
 	cat $ID/out_standard 
-	cat $ID/out_standard | mail -s "$TARGET is initalized successfully. If the command output is not right, let admins know it" $EMAIL
+	[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_standard | mail -s "$TARGET is initalized successfully. If the command output is not right, let admins know it" $EMAIL
 else
 	if fuser $ID/lock &> /dev/null
 	then
@@ -80,16 +98,17 @@ else
 	(
 		if ! flock -xn 99
 		then
-			echo | mail -s "$TARGET ERR-001: flock failed" $EMAIL
+			[ "$DAIMON_EMAIL" = "NO" ] || echo | mail -s "$TARGET ERR-001: flock failed" $EMAIL
 		else
 			set +e
-			bash -c "$CMD" >> $ID/out_current 2>> $ID/out_current
+			timeout 60 bash -c "$CMD" >> $ID/out_current 2>> $ID/out_current
 			let RTN=$?
 			set -e
 			if [ $RTN -ne 0 ]
 			then
 				echo "Sub-command returned $RTN" >> $ID/out_current
 			fi
+			set +f
 			for STD in $(cd $ID && ls out_standard.* 2>/dev/null) out_standard
 			do
 				if diff $ID/out_current $ID/$STD > $ID/diff_$STD 2> /dev/null
@@ -98,37 +117,39 @@ else
 				fi
 			done
 			cd $ID && mv $(ls -rS diff_out_standard* | head -n 1) diff_current && rm -f diff_out_standard* 2> /dev/null
+			set -f
+			if [ -f $ID/diff_count ]
+			then
+				let FAILED_PRV=$(cat $ID/diff_count) || :
+			else
+				let FAILED_PRV=0 || :
+			fi
 			if [ -s $ID/diff_current ]
 			then
-				if [ -f $ID/diff_count ] && diff -q $ID/diff_current $ID/diff_previous &> /dev/null
+				if [ $FAILED_PRV -gt 0 ] && diff -q $ID/diff_current $ID/diff_previous &> /dev/null
 				then
-					let FAILED=$(cat $ID/diff_count) || :
-					let FAILED=FAILED+1
+					let FAILED_CUR=$FAILED_PRV+1
 				else
-					let FAILED=1
+					let FAILED_CUR=1
 					cp $ID/diff_current $ID/diff_previous
 					cp $ID/diff_current $ID/history-$(date +%FT%T)-abnm
 				fi
-				echo $FAILED > $ID/diff_count
-				if [ $FAILED -le $COUNT ]
+				echo $FAILED_CUR > $ID/diff_count
+				if [ $FAILED_CUR -le $COUNT ]
 				then
-					if [ $FAILED -eq $COUNT -a $COUNT -gt 1 ]
+					if [ $FAILED_CUR -eq $COUNT -a $COUNT -gt 1 ]
 					then
 						SUBJECT="$TARGET is detected (FINAL ALERT)"
 					else
 						SUBJECT="$TARGET is detected"
 					fi
-					cat $ID/diff_current | col -b 2>&1 | mail -s "$SUBJECT" $EMAIL
+					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff_current | strings 2>&1 | mail -s "$SUBJECT" $EMAIL
 				fi
 			else
-				if [ -f $ID/diff_count ]
+				if [ $FAILED_PRV -gt 0 ]
 				then
-					let FAILED=$(cat $ID/diff_count) || :
-					if [ $FAILED -gt 0 ]
-					then
-						cat $ID/out_current | col -b 2>&1 | mail -s "$TARGET is back to normal" $EMAIL
-						echo $FAILED > $ID/history-$(date +%FT%T)-norm
-					fi
+					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_current | strings 2>&1 | mail -s "$TARGET is back to normal" $EMAIL
+					echo $FAILED_PRV > $ID/history-$(date +%FT%T)-norm
 				fi
 				echo 0 > $ID/diff_count
 				rm -f $ID/diff_previous

@@ -1,45 +1,68 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 #Author Manhong Dai, MNI, U of Michigan
-set -e
+set -euf
+set -o pipefail
 trap "exit 1" TERM
 function helpme {
-	if [[ "$1" != "" ]]
+	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		cat /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | grep -e "	-\|^#" | grep -- "$(echo $OPT_SHORT | sed -e "s/://g" | sed -e "s/\(.\)/\t-\1 \\\|/g" | sed -e "s/$/^#$COMMAND\t\\\|^#[A-Z]/" )" | sed -e "s/^#$COMMAND\t/\t/; s/^#//" 1>&2
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220313
 	fi
 	PGID=$(cut -d ' ' -f 5 /proc/$$/stat)
 	kill -s TERM -- -$PGID
 }
-OPT_SHORT="hv"
-OPT_LONG="help,verbose"
+ALL=NO
+OPT_SHORT="hva"
+OPT_LONG="help,version,all"
 OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
 eval set -- "$OPTS"
-while :
+while [ $# -gt 0 ]
 do
 	case "$1" in
 #HELPME_START
-#SYNOPSIS:
+#SYNOPSIS
 #	dm-report [OPTION]... 
-#EXAMPLE:
+#EXAMPLE
 #	dm-report
-		-h | --help)
+#DESCRIPTION
+		-h | --help)	#print help information
 			helpme ;;
-		-v | --verbose)	#optional, verbose
+		--version)	#print version
+			helpme 20220312 ;;
+		-v )	#verbose output
 			set -x
+			shift ;;
+		-a | --all)	#report all tasks, regardless of current directory
+			ALL=YES
 			shift ;;
 		--)
 			shift 1 ;;
 		*)
 			break ;;
+#AUTHOR
+#	Manhong Dai, MNI, U of Michigan
+#COPYRIGHT
+#	Copyright © 2002-2022 University of Michigan. License GPLv3+: GNU
+#	GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+#	This is free software: you are free to change and redistribute it.
+#	There is NO WARRANTY, to the extent permitted by law.
 #HELPME_END
 	esac
 done
 CONFIG=/etc/daimon.conf
 . $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
-cd $DAIMON_HOME/var || helpme "ERR-101: DAIMON_HOME is not defined in the configuration file $CONFIG"
+[ -n "$DAIMON_HOME" ] || helpme "ERR-101: DAIMON_HOME is not defined in the configuration file $CONFIG"
+if [ "$ALL" = "YES" ]
+then
+	cd $DAIMON_HOME/var
+elif [[ $PWD != $DAIMON_HOME/var* ]]
+then
+	helpme "ERR-102: cd to any directory under $DAIMON_HOME/var at first, or use '-a'"
+fi
 let TS=$(date +%s)
+HEADER="Count\tTime\tTask"
 find . -type f -name diff_count | sort | while read F;
 do
 	diff -q $F <(echo 0) > /dev/null && continue 
@@ -65,5 +88,6 @@ do
 	else
 		T=NA
 	fi
+	[ -z "$HEADER" ] || echo -e $HEADER && HEADER=""
 	echo -e "$(cat $F)\t$T\t$D"
 done 

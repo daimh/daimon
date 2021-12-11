@@ -1,48 +1,74 @@
-#!/usr/bin/bash
-#Author Manhong Dai, MNI, U of Michigan
-set -e
+#!/usr/bin/env bash
+set -euf
+set -o pipefail
 trap "exit 1" TERM
 function helpme {
-	if [[ "$1" != "" ]]
+	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		cat /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | grep -e "	-\|^#" | grep -- "$(echo $OPT_SHORT | sed -e "s/://g" | sed -e "s/\(.\)/\t-\1 \\\|/g" | sed -e "s/$/^#$COMMAND\t\\\|^#[A-Z]/" )" | sed -e "s/^#$COMMAND\t/\t/; s/^#//" 1>&2
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220313
 	fi
 	PGID=$(cut -d ' ' -f 5 /proc/$$/stat)
 	kill -s TERM -- -$PGID
 }
-OPT_SHORT="hvm:"
-OPT_LONG="help,verbose,md5sum:"
+ALL=NO
+REMOVE=NO
+OPT_SHORT="hvar"
+OPT_LONG="help,version,all,remove"
 OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
 eval set -- "$OPTS"
-while :
+while [ $# -gt 0 ]
 do
 	case "$1" in
 #HELPME_START
-#SYNOPSIS:
+#SYNOPSIS
 #	dm-check [OPTION]... 
-#EXAMPLE:
+#EXAMPLE
 #	cd /opt/daimon/var; dm-check
-		-h | --help)
+#DESCRIPTION
+		-h | --help)	#print help information
 			helpme ;;
-		-v | --verbose)	#optional, verbose
+		--version)	#print version
+			helpme 20220312 ;;
+		-v )	#verbose output
 			set -x
 			shift ;;
-		-m | --md5sum)	#HASH, override 'out_standard' if the diff file has a md5sum of HASH.
-			MD5SUM=$2
-			shift 2 ;;
+		-a | --all)	#check all tasks, regardless of current directory
+			ALL=YES
+			shift ;;
+		-r | --remove)	#remove all log files under current directory
+			REMOVE=YES
+			shift ;;
 		--)
 			shift
 			break ;;
 		*)
 			break ;;
+#AUTHOR
+#	Manhong Dai, MNI, U of Michigan
+#COPYRIGHT
+#	Copyright © 2002-2022 University of Michigan. License GPLv3+: GNU
+#	GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+#	This is free software: you are free to change and redistribute it.
+#	There is NO WARRANTY, to the extent permitted by law.
 #HELPME_END
 	esac
 done
 CONFIG=/etc/daimon.conf
 . $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
-[[ $PWD = $DAIMON_HOME/var* ]] || helpme "ERR-101: cd to $DAIMON_HOME/var/ or one sub-directory under it before running dm-check"
+[ -n "$DAIMON_HOME" ] || helpme "ERR-101: DAIMON_HOME is not defined in the configuration file $CONFIG"
+if [ "$ALL" = "YES" ]
+then
+	cd $DAIMON_HOME/var
+elif [[ $PWD != $DAIMON_HOME/var* ]]
+then
+	helpme "ERR-102: cd to any directory under $DAIMON_HOME/var at first, or use '-a'"
+fi
+if [ "$REMOVE" = "YES" ]
+then
+	find . -type f -name "history-*" -print -exec rm {} \;
+fi
 CUT=$(echo $DAIMON_HOME/var/ | wc -c)
 for f in $(find $* -type d | sort)
 do
@@ -58,35 +84,25 @@ do
 		[ -f $f/diff_count ] && diff -q $f/diff_count <(echo 0) > /dev/null && exit
 		[ ! -f $f/out_current -o ! -f $f/out_standard ] && exit
 		[ -f $f/diff_current -a ! -s $f/diff_current ] && exit 
-		if [ -n "$MD5SUM" ]
-		then
-			DIFFSUM="$(md5sum $f/diff_current| cut -c 1-32)"
-			if [ "$DIFFSUM" = "$MD5SUM" ]
-			then
-				cp $f/out_current $f/out_standard && echo 0 > $f/diff_count
-				exit
-			else
-				echo md5sum: $DIFFSUM @$f
-			fi
-		else
-			clear
-			diff $f/out_current $f/out_standard | less -F -P "$(realpath $f | cut -c $CUT-)"
-			while :
-			do
-				read -n 1 -r -p "Standardize '$(realpath $f | cut -c $CUT-)'? [y/nq]" ynq
-				case "$ynq" in
-					Y|y )
-						mv $f/out_standard $f/history-$(date +%FT%T)-standard
-						cp $f/out_current $f/out_standard 
-						echo 0 > $f/diff_count
-						break;;
-					N|n|q )
-						break;;
-					* )
-						echo "Please answer y, n or q";;
-				esac
-			done
-			echo
-		fi
+		clear
+		set +o pipefail
+		diff $f/out_current $f/out_standard | less -FXP "$(realpath $f | cut -c $CUT-)"
+		set -o pipefail
+		while :
+		do
+			read -n 1 -r -p "Standardize '$(realpath $f | cut -c $CUT-)'? [y/nq]" ynq
+			case "$ynq" in
+				Y|y )
+					mv $f/out_standard $f/history-$(date +%FT%T)-standard
+					cp $f/out_current $f/out_standard 
+					echo 0 > $f/diff_count
+					break;;
+				N|n|q )
+					break;;
+				* )
+					echo "Please answer y, n or q";;
+			esac
+		done
+		echo
 	) 99> $f/lock
 done
