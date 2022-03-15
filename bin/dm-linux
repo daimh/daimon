@@ -225,7 +225,7 @@ class Areca(Task):
 			err_exit('ERR-106: wrong operand for --areca')
 		self.temperature = int(fs[0][:-1])
 		cli64 = '%s\nquit' % '\n'.join(['set curctrl=%d\nhw info\nvsf info\ndisk info' % (idx+1) for idx in range(int(fs[1]))])
-		self.cmds.append(f'echo -e "{cli64}" | (cli64 | strings || true)')
+		self.cmds.append(f'echo -e "{cli64}" | (cli64 | strings -n 1 || true)')
 		self.printit = True
 	def getln(self, ln):
 		if "Ctrl Temperature" in ln or "Controller Temp." in ln:

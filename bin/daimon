@@ -143,12 +143,12 @@ else
 					else
 						SUBJECT="$TARGET is detected"
 					fi
-					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff_current | strings 2>&1 | mail -s "$SUBJECT" $EMAIL
+					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff_current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EMAIL
 				fi
 			else
 				if [ $FAILED_PRV -gt 0 ]
 				then
-					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_current | strings 2>&1 | mail -s "$TARGET is back to normal" $EMAIL
+					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_current | strings -n 1 2>&1 | mail -s "$TARGET is back to normal" $EMAIL
 					echo $FAILED_PRV > $ID/history-$(date +%FT%T)-norm
 				fi
 				echo 0 > $ID/diff_count
