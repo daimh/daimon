@@ -1,6 +1,6 @@
 # daimon, the simplest but powerful and flexible monitoring tool
 
-'daimon' runs a sub-command specified in crontab, compares its output with the standard file(s) under the TARGET directory under var/, records the history, and sends out email alert if user specifed so in /etc/daimon.conf if the output is different.
+'daimon' runs a sub-command specified in crontab, compares its output with the standard file(s) under the TASK directory under var/, records the history, and sends out email alert if user specifed so in /etc/daimon.conf if the output is different.
 
 'dm-report' reports all monitoring task status.
 

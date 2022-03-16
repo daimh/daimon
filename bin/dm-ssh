@@ -32,7 +32,7 @@ fi
 LIST=NO
 ARGLIST=$@
 OPT_SHORT="hvlu:s:e:E:H:j:"
-OPT_LONG="help,version,list,user:set:,exclude-host:,exclude-set:,header:,jobs:"
+OPT_LONG="help,version,list,user:set:,exclude-hosts:,exclude-sets:,header:,jobs:"
 OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n dm-ssh -- "$@")
 HEADER=0
 SSHUSER=$USER
@@ -71,10 +71,10 @@ do
 		-s | --set)	#host set name defined in output of '-l'
 			SET=$2
 			shift 2 ;;
-		-e | --exclude-host)	#exclude host
+		-e | --exclude-hosts)	#exclude hosts. E.g. host-1,host-2
 			echo $2 | sed -e "s/,/\n/g" >> $JOB-exclude
 			shift 2 ;;
-		-E | --exclude-set)	#excluded host set
+		-E | --exclude-sets)	#excluded host sets. E.g. set1,set2
 			echo $2 | sed -e "s/,/\n/g" | while read E
 			do
 				grep -q ^$E: $CONF || helpme "ERR-006: exclude-set '$E' doesn't exist"

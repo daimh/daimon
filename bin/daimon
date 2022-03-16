@@ -15,10 +15,10 @@ function helpme {
 CONFIG=/etc/daimon.conf
 . $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
 EMAIL=""
-TARGET=""
+TASK=""
 let COUNT=1
 OPT_SHORT="hvt:m:n:"
-OPT_LONG="help,version,target:,mail:,count:"
+OPT_LONG="help,version,task:,mail:,count:"
 OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
 eval set -- "$OPTS"
 while [ $# -gt 0 ]
@@ -37,10 +37,10 @@ do
 		-v )	#verbose output
 			set -x
 			shift ;;
-		-t | --target)	#target name
-			TARGET=$2
+		-t | --task)	#name of a sub-directory under $DAIMON_HOME/var
+			TASK=$2
 			shift 2 ;;
-		-m | --mail)	#alertee email addresses, seperated by comma
+		-m | --mail)	#email addresses the alerts will be sent to, seperated by comma
 			EMAIL=$(echo $2 | sed -e "s/,/ /g")
 			shift 2 ;;
 		-n | --count)	#send up to COUNT alerts for a new incident, default 1
@@ -71,8 +71,8 @@ fi
 CMD="$@"
 [ -n "$DAIMON_HOME" ] || helpme "ERR-103: missing environment variable DAIMON_HOME in Configuration file $CONFIG"
 [ -d "$DAIMON_HOME" ] || helpme "ERR-104: $DAIMON_HOME is not a directory"
-[ -n "$TARGET" ] || helpme "ERR-105: TARGET is missing"
-ID=$DAIMON_HOME/var/$TARGET
+[ -n "$TASK" ] || helpme "ERR-105: TASK is missing"
+ID=$DAIMON_HOME/var/$TASK
 [ -t 1 ] || sleep $[ $RANDOM%10 ]
 if [ ! -f $ID/out_standard ]
 then
@@ -82,23 +82,23 @@ then
 	then 
 		cat $ID/out_current
 		echo 99999 > $ID/diff_count
-		helpme "ERR-106: INITIALIZING FAILED FOR $TARGET"
+		helpme "ERR-106: INITIALIZING FAILED FOR $TASK"
 	fi
 	mv $ID/out_current $ID/out_standard
 	cat $ID/out_standard 
-	[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_standard | mail -s "$TARGET is initalized successfully. If the command output is not right, let admins know it" $EMAIL
+	[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_standard | mail -s "$TASK is initalized successfully. If the command output is not right, let admins know it" $EMAIL
 else
 	if fuser $ID/lock &> /dev/null
 	then
 		fuser -k $ID/lock &> /dev/null
-		echo "ERR-002: A previous $TARGET is still running, it is killed" >> $ID/out_current
+		echo "ERR-002: A previous $TASK is still running, it is killed" >> $ID/out_current
 	else
 		rm -f $ID/out_current
 	fi
 	(
 		if ! flock -xn 99
 		then
-			[ "$DAIMON_EMAIL" = "NO" ] || echo | mail -s "$TARGET ERR-001: flock failed" $EMAIL
+			[ "$DAIMON_EMAIL" = "NO" ] || echo | mail -s "$TASK ERR-001: flock failed" $EMAIL
 		else
 			set +e
 			timeout 60 bash -c "$CMD" >> $ID/out_current 2>> $ID/out_current
@@ -139,16 +139,16 @@ else
 				then
 					if [ $FAILED_CUR -eq $COUNT -a $COUNT -gt 1 ]
 					then
-						SUBJECT="$TARGET is detected (FINAL ALERT)"
+						SUBJECT="$TASK is detected (FINAL ALERT)"
 					else
-						SUBJECT="$TARGET is detected"
+						SUBJECT="$TASK is detected"
 					fi
 					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff_current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EMAIL
 				fi
 			else
 				if [ $FAILED_PRV -gt 0 ]
 				then
-					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_current | strings -n 1 2>&1 | mail -s "$TARGET is back to normal" $EMAIL
+					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_current | strings -n 1 2>&1 | mail -s "$TASK is back to normal" $EMAIL
 					echo $FAILED_PRV > $ID/history-$(date +%FT%T)-norm
 				fi
 				echo 0 > $ID/diff_count

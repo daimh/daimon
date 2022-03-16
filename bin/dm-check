@@ -37,7 +37,7 @@ do
 		-a | --all)	#check all tasks, regardless of current directory
 			ALL=YES
 			shift ;;
-		-r | --remove)	#remove all log files under current directory
+		-r | --remove)	#remove all history files under current directory
 			REMOVE=YES
 			shift ;;
 		--)
