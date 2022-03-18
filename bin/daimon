@@ -104,9 +104,12 @@ else
 			timeout 60 bash -c "$CMD" >> $ID/out_current 2>> $ID/out_current
 			let RTN=$?
 			set -e
-			if [ $RTN -ne 0 ]
+			if [ $RTN -eq 124 -o $RTN -eq 125 -o $RTN -eq 126 -o $RTN -eq 127 -o $RTN -eq 137 ]
 			then
-				echo "Sub-command returned $RTN" >> $ID/out_current
+				echo "timeout returned $RTN" >> $ID/out_current
+			elif [ $RTN -ne 0 ]
+			then
+				echo "sub-command returned $RTN" >> $ID/out_current
 			fi
 			set +f
 			for STD in $(cd $ID && ls out_standard.* 2>/dev/null) out_standard
