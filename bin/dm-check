@@ -80,22 +80,22 @@ do
 			read -n 1 -r -p "$f is locked, press any key to continue" 
 			exit
 		fi
-		[ ! -f $f/diff_count ] && exit
-		[ -f $f/diff_count ] && diff -q $f/diff_count <(echo 0) > /dev/null && exit
-		[ ! -f $f/out_current -o ! -f $f/out_standard ] && exit
-		[ -f $f/diff_current -a ! -s $f/diff_current ] && exit 
+		[ ! -f $f/diff-count ] && exit
+		[ -f $f/diff-count ] && diff -q $f/diff-count <(echo 0) > /dev/null && exit
+		[ ! -f $f/out-current -o ! -f $f/out-standard ] && exit
+		[ -f $f/diff-current -a ! -s $f/diff-current ] && exit 
 		clear
 		set +o pipefail
-		diff $f/out_current $f/out_standard | less -FXP "$(realpath $f | cut -c $CUT-)"
+		diff $f/out-current $f/out-standard | less -FXP "$(realpath $f | cut -c $CUT-)"
 		set -o pipefail
 		while :
 		do
 			read -n 1 -r -p "Standardize '$(realpath $f | cut -c $CUT-)'? [y/nq]" ynq
 			case "$ynq" in
 				Y|y )
-					mv $f/out_standard $f/history-$(date +%FT%T)-standard
-					cp $f/out_current $f/out_standard 
-					echo 0 > $f/diff_count
+					mv $f/out-standard $f/history-$(date +%FT%T)-standard
+					cp $f/out-current $f/out-standard 
+					echo 0 > $f/diff-count
 					break;;
 				N|n|q )
 					break;;

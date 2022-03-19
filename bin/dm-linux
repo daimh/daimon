@@ -375,6 +375,7 @@ class Nvidia(Task):
 		if ln.startswith('        Idle'): return
 		if ln.startswith('        SW Power Cap'): return
 		if ln.startswith('                Current'): return
+		if ln.startswith('                    Current'): return
 		if ln.endswith('mV'): return
 		if ln.endswith('MHz'): return
 		if ln.endswith('MiB'):

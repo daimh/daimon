@@ -74,26 +74,26 @@ CMD="$@"
 [ -n "$TASK" ] || helpme "ERR-105: TASK is missing"
 ID=$DAIMON_HOME/var/$TASK
 [ -t 1 ] || sleep $[ $RANDOM%10 ]
-if [ ! -f $ID/out_standard ]
+if [ ! -f $ID/out-standard ]
 then
 	mkdir -p $ID
-	rm -f $ID/diff_count
-	if ! timeout 60 bash -c "$CMD" &> $ID/out_current
+	rm -f $ID/diff-count
+	if ! timeout 60 bash -c "$CMD" &> $ID/out-current
 	then 
-		cat $ID/out_current
-		echo 99999 > $ID/diff_count
+		cat $ID/out-current
+		echo 99999 > $ID/diff-count
 		helpme "ERR-106: INITIALIZING FAILED FOR $TASK"
 	fi
-	mv $ID/out_current $ID/out_standard
-	cat $ID/out_standard 
-	[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_standard | mail -s "$TASK is initalized successfully. If the command output is not right, let admins know it" $EMAIL
+	mv $ID/out-current $ID/out-standard
+	cat $ID/out-standard 
+	[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out-standard | mail -s "$TASK is initalized successfully. If the command output is not right, let admins know it" $EMAIL
 else
 	if fuser $ID/lock &> /dev/null
 	then
 		fuser -k $ID/lock &> /dev/null
-		echo "ERR-002: A previous $TASK is still running, it is killed" >> $ID/out_current
+		echo "ERR-002: A previous $TASK is still running, it is killed" >> $ID/out-current
 	else
-		rm -f $ID/out_current
+		rm -f $ID/out-current
 	fi
 	(
 		if ! flock -xn 99
@@ -101,43 +101,43 @@ else
 			[ "$DAIMON_EMAIL" = "NO" ] || echo | mail -s "$TASK ERR-001: flock failed" $EMAIL
 		else
 			set +e
-			timeout 60 bash -c "$CMD" >> $ID/out_current 2>> $ID/out_current
+			timeout 60 bash -c "$CMD" >> $ID/out-current 2>> $ID/out-current
 			let RTN=$?
 			set -e
 			if [ $RTN -eq 124 -o $RTN -eq 125 -o $RTN -eq 126 -o $RTN -eq 127 -o $RTN -eq 137 ]
 			then
-				echo "timeout returned $RTN" >> $ID/out_current
+				echo "timeout returned $RTN" >> $ID/out-current
 			elif [ $RTN -ne 0 ]
 			then
-				echo "sub-command returned $RTN" >> $ID/out_current
+				echo "sub-command returned $RTN" >> $ID/out-current
 			fi
 			set +f
-			for STD in $(cd $ID && ls out_standard.* 2>/dev/null) out_standard
+			for STD in $(cd $ID && ls out-standard.* 2>/dev/null) out-standard
 			do
-				if diff $ID/out_current $ID/$STD > $ID/diff_$STD 2> /dev/null
+				if diff $ID/out-current $ID/$STD > $ID/diff-$STD 2> /dev/null
 				then
 					break
 				fi
 			done
-			cd $ID && mv $(ls -rS diff_out_standard* | head -n 1) diff_current && rm -f diff_out_standard* 2> /dev/null
+			cd $ID && mv $(ls -rS diff-out-standard* | head -n 1) diff-current && rm -f diff-out-standard* 2> /dev/null
 			set -f
-			if [ -f $ID/diff_count ]
+			if [ -f $ID/diff-count ]
 			then
-				let FAILED_PRV=$(cat $ID/diff_count) || :
+				let FAILED_PRV=$(cat $ID/diff-count) || :
 			else
 				let FAILED_PRV=0 || :
 			fi
-			if [ -s $ID/diff_current ]
+			if [ -s $ID/diff-current ]
 			then
-				if [ $FAILED_PRV -gt 0 ] && diff -q $ID/diff_current $ID/diff_previous &> /dev/null
+				if [ $FAILED_PRV -gt 0 ] && diff -q $ID/diff-current $ID/diff-previous &> /dev/null
 				then
 					let FAILED_CUR=$FAILED_PRV+1
 				else
 					let FAILED_CUR=1
-					cp $ID/diff_current $ID/diff_previous
-					cp $ID/diff_current $ID/history-$(date +%FT%T)-abnm
+					cp $ID/diff-current $ID/diff-previous
+					cp $ID/diff-current $ID/history-$(date +%FT%T)-abnm
 				fi
-				echo $FAILED_CUR > $ID/diff_count
+				echo $FAILED_CUR > $ID/diff-count
 				if [ $FAILED_CUR -le $COUNT ]
 				then
 					if [ $FAILED_CUR -eq $COUNT -a $COUNT -gt 1 ]
@@ -146,16 +146,16 @@ else
 					else
 						SUBJECT="$TASK is detected"
 					fi
-					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff_current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EMAIL
+					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff-current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EMAIL
 				fi
 			else
 				if [ $FAILED_PRV -gt 0 ]
 				then
-					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out_current | strings -n 1 2>&1 | mail -s "$TASK is back to normal" $EMAIL
+					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out-current | strings -n 1 2>&1 | mail -s "$TASK is back to normal" $EMAIL
 					echo $FAILED_PRV > $ID/history-$(date +%FT%T)-norm
 				fi
-				echo 0 > $ID/diff_count
-				rm -f $ID/diff_previous
+				echo 0 > $ID/diff-count
+				rm -f $ID/diff-previous
 			fi
 		fi 
 	) 99> $ID/lock
