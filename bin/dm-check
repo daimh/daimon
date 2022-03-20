@@ -86,11 +86,11 @@ do
 		[ -f $f/diff-current -a ! -s $f/diff-current ] && exit 
 		clear
 		set +o pipefail
-		diff $f/out-current $f/out-standard | less -FXP "$(realpath $f | cut -c $CUT-)"
+		diff $f/out-current $f/out-standard | less -FXP "$(realpath -s $f | cut -c $CUT-)"
 		set -o pipefail
 		while :
 		do
-			read -n 1 -r -p "Standardize '$(realpath $f | cut -c $CUT-)'? [y/nq]" ynq
+			read -n 1 -r -p "Standardize '$(realpath -s $f | cut -c $CUT-)'? [y/nq]" ynq
 			case "$ynq" in
 				Y|y )
 					mv $f/out-standard $f/history-$(date +%FT%T)-standard
