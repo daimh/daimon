@@ -16,9 +16,10 @@ CONFIG=/etc/daimon.conf
 . $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
 EMAIL=""
 TASK=""
-let COUNT=1
-OPT_SHORT="hvt:m:n:"
-OPT_LONG="help,version,task:,mail:,count:"
+let COUNT=60
+let TIMEOUT=60
+OPT_SHORT="hvt:m:n:s:"
+OPT_LONG="help,version,task:,mail:,count:,seconds:"
 OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
 eval set -- "$OPTS"
 while [ $# -gt 0 ]
@@ -45,6 +46,9 @@ do
 			shift 2 ;;
 		-n | --count)	#send up to COUNT alerts for a new incident, default 1
 			let COUNT=$2 || helpme "ERR-101: -n needs a positive number"
+			shift 2 ;;
+		-s | --seconds)	#timeout of CMD, in seconds, default 60
+			let TIMEOUT=$2 || helpme "ERR-107: -s needs a positive number"
 			shift 2 ;;
 		--)
 			shift 1 ;;
@@ -78,7 +82,7 @@ if [ ! -f $ID/out-standard ]
 then
 	mkdir -p $ID
 	rm -f $ID/diff-count
-	if ! timeout 60 bash -c "$CMD" &> $ID/out-current
+	if ! timeout $TIMEOUT bash -c "$CMD" &> $ID/out-current
 	then 
 		cat $ID/out-current
 		echo 99999 > $ID/diff-count
@@ -101,7 +105,7 @@ else
 			[ "$DAIMON_EMAIL" = "NO" ] || echo | mail -s "$TASK ERR-001: flock failed" $EMAIL
 		else
 			set +e
-			timeout 60 bash -c "$CMD" >> $ID/out-current 2>> $ID/out-current
+			timeout $TIMEOUT bash -c "$CMD" >> $ID/out-current 2>> $ID/out-current
 			let RTN=$?
 			set -e
 			if [ $RTN -eq 124 -o $RTN -eq 125 -o $RTN -eq 126 -o $RTN -eq 127 -o $RTN -eq 137 ]
