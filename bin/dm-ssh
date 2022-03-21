@@ -175,7 +175,7 @@ do
 			tail -n +$HEADER $F | head -n -1 | sed -e "s/^/$RTN:$HOST:\t/"
 		elif [ $CMP -eq 0 ]
 		then
-			FAILEDHOSTS+=( $( basename $F |cut -d - -f 4-))
+			FAILEDHOSTS+=( $( basename $F |cut -d - -f 5-))
 		fi
 	done
 	set -f
