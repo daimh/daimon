@@ -16,7 +16,7 @@ CONFIG=/etc/daimon.conf
 . $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
 EMAIL=""
 TASK=""
-let COUNT=60
+let COUNT=1
 let TIMEOUT=60
 OPT_SHORT="hvt:m:n:s:"
 OPT_LONG="help,version,task:,mail:,count:,seconds:"
