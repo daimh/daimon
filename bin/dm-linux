@@ -442,6 +442,7 @@ def main():
 		print(f'{prefix}:\t{ln}')
 	for prefix, tsk in sorted(tasks.items()):
 		tsk.post_getln(prefix)
-	return p.returncode
+	if p.returncode != 0:
+		err_exit(f'ERR-101: ssh failed!\n{sshout}')
 
 if __name__ == '__main__': main()
