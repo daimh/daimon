@@ -11,7 +11,6 @@ def get_args():
 	parser.add_argument("-p", "--port", type=int, help="Port number of the linux target", metavar="PORT", default=22)
 	parser.add_argument("-V", "--version", action='version', version='20220312')
 	for cls in Task.__subclasses__():
-		if cls.__name__.lower() == 'sysinfo': continue
 		add_class_to_parser(cls, parser)
 	return parser.parse_args()
 	
@@ -35,11 +34,11 @@ def add_class_to_task(cls, args, tasks):
 	for subcls in cls.__subclasses__():
 		add_class_to_task(subcls, args, tasks)
 	option = cls.__name__.lower()
-	if option == 'sysinfo':
-		params = [None]
-	else:
-		params = getattr(args, option)
+	params = getattr(args, option)
+	if option != 'sysinfo' :
 		if params is None: return
+	elif params is None:
+		params = [None]
 	for idx in range(len(params)):
 		tsk = cls(params[idx])
 		prefix = f'{option}:{idx}'.upper()
@@ -193,7 +192,7 @@ class AllowedTimeOffset(Task):
 	def __init__(self, param):
 		super().__init__()
 		if not param.endswith('S'):
-			err_exit('ERR-112: wrong operand for --allowedtimeoffset')
+			err_exit('ERR-113: wrong operand for --allowedtimeoffset')
 		self.check = int(param[:-1])
 		now = int(time.time())
 		self.cmds.append(f'date "+%s - {now}"')
@@ -204,6 +203,8 @@ class AllowedTimeOffset(Task):
 		return f'{diff}'
 
 class Sysinfo(Task):
+	helpmsg = "check some standard system information. It is always turned on. Network information checking can be turned off with 'netoff'. Example: '--sysinfo netoff '"
+	metavar = "SWITCH"
 	def __init__(self, param):
 		super().__init__()
 		self.cmds += [
@@ -211,9 +212,14 @@ class Sysinfo(Task):
 			f'head -n 1 /proc/meminfo',
 			f'[ ! -f /proc/mdstat ] || grep -v bitmap: /proc/mdstat',
 			f'[ ! -f /proc/drbd ] || grep " cs:" /proc/drbd',
-			f'[ ! -f /proc/net/bonding/bond0 ] || cat /proc/net/bonding/bond*',
-			f'ip a | grep -v valid_lft | sed -e "s/ $//"',
 		]
+		if param is None:
+			self.cmds += [
+				f'[ ! -f /proc/net/bonding/bond0 ] || cat /proc/net/bonding/bond*',
+				f'ip a | grep -v valid_lft | sed -e "s/ $//"',
+			]
+		elif param != 'netoff':
+			err_exit('ERR-107: wrong operand for --sysinfo')
 	def getln(self, ln):
 		if ln.startswith('SYSINFO:\t      bitmap:'): return
 		return ln
