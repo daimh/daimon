@@ -437,7 +437,7 @@ def main():
 	cmds = []
 	for prefix in sorted(tasks.keys()):
 		cmds += tasks[prefix].cmds
-	p = subprocess.Popen(["ssh", "-o", "loglevel=error", "-np", str(args.port), args.host, "((RTN=0)); " + "; ((RTN+=$?)); ".join([f'(set -e && set -o pipefail && {c})' for c in cmds]) + "; if [ $RTN -gt 0 ]; then echo ERROR: $RTN commands failed; exit 1; fi"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	p = subprocess.Popen(["ssh", "-o", "loglevel=error", "-np", str(args.port), args.host, "((RTN=0)); " + "; (($?==0)) || ((RTN+=1)); ".join([f'(set -e && set -o pipefail && {c})' for c in cmds]) + "; if [ $RTN -gt 0 ]; then echo ERROR: $RTN commands failed; exit 1; fi"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 	sshout = p.communicate()[0].decode('utf-8', 'ignore').rstrip()
 	for ln in sshout.split('\n'):
 		idx = ln.find(':\t')
@@ -449,6 +449,6 @@ def main():
 	for prefix, tsk in sorted(tasks.items()):
 		tsk.post_getln(prefix)
 	if p.returncode != 0:
-		err_exit(f'ERR-101: ssh failed!\n{sshout}')
+		err_exit(f'ERR-101: ssh failed!')
 
 if __name__ == '__main__': main()
