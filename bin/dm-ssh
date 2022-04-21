@@ -30,9 +30,10 @@ then
 	[ -f $CONF ] || helpme "ERR-001: missing config file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
 fi
 LIST=NO
+DELAY=0
 ARGLIST=$@
-OPT_SHORT="hvlu:s:e:E:H:j:"
-OPT_LONG="help,version,list,user:set:,exclude-hosts:,exclude-sets:,header:,jobs:"
+OPT_SHORT="hvlu:s:e:E:H:j:d:"
+OPT_LONG="help,version,list,user:set:,exclude-hosts:,exclude-sets:,header:,jobs:delay:"
 OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n dm-ssh -- "$@")
 HEADER=0
 SSHUSER=$USER
@@ -81,11 +82,14 @@ do
 				grep ^$E: $CONF | cut -d '	' -f 2 |sed -e "s/,/\n/g" >> $JOB-exclude
 			done
 			shift 2 ;;
-		-H | --header)	#number of header line
+		-H | --header)	#number of header lines
 			((HEADER=$2))
 			shift 2 ;;
 		-j | --jobs)	#number of parallel jobs, default 0 means as many as possible
 			PARALLEL=$2
+			shift 2 ;;
+		-d | --delay)	#NUM, sleep a random fraction of NUM seconds before ssh-ing, default 0
+			((DELAY=$2))
 			shift 2 ;;
 		--)
 			shift 1 
@@ -142,7 +146,14 @@ fi
 join -v 1 <( cut -d '	' -f 2 $JOB-set | sed -e "s/,/\n/g" | sort -u ) <(sort -u $JOB-exclude) > $JOB-nodes
 message "####ssh to####"
 echo -ne "..$(head -n 1 $JOB-nodes)\r" 1>&2
-paste <(cat $JOB-nodes) <(tail -n +2 $JOB-nodes; echo DONE ) |parallel -k -j $PARALLEL --colsep '\t' "ssh -o ConnectTimeout=2 -o LogLevel=error -o StrictHostKeyChecking=no -n $SSHUSER@{1} \"$CMD\" &> $JOB-host-{1}; RTN=\$?; echo -n -e \"\$RTN:{1} \n..{2}\r\" 1>&2; [ \"\$(tail -c 1 $JOB-host-{1} | od -iAn | tr -d ' ' )\" != \"10\" ] && echo -e \"\n\" >> $JOB-host-{1}; echo \$RTN >> $JOB-host-{1}"
+paste <(cat $JOB-nodes) <(tail -n +2 $JOB-nodes; echo DONE ) |parallel -k -j $PARALLEL --colsep '\t' "
+	sleep \$(bc <<< \"scale=3; $DELAY*\$RANDOM/32768\" );
+	ssh -o ConnectTimeout=2 -o LogLevel=error -o StrictHostKeyChecking=no -n $SSHUSER@{1} \"$CMD\" &> $JOB-host-{1};
+	RTN=\$?;
+	echo -n -e \"\$RTN:{1} \n..{2}\r\" 1>&2;
+	[ \"\$(tail -c 1 $JOB-host-{1} | od -iAn | tr -d ' ' )\" != \"10\" ] && echo -e \"\n\" >> $JOB-host-{1};
+	echo \$RTN >> $JOB-host-{1};
+"
 message "####Output####"
 [ ! -t 1 ] || tabs 16
 FAILEDHOSTS=()
