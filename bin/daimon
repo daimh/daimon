@@ -34,7 +34,7 @@ do
 		-h | --help)	#print help information
 			helpme ;;
 		--version)	#print version
-			helpme 20220312 ;;
+			helpme 20220422 ;;
 		-v )	#verbose output
 			set -x
 			shift ;;
@@ -95,73 +95,73 @@ else
 	if fuser $ID/lock &> /dev/null
 	then
 		fuser -k $ID/lock &> /dev/null
-		echo "ERR-002: A previous $TASK is still running, it is killed" >> $ID/out-current
+		echo "ERR-002: A previous $TASK is killed as it is stuck" > $ID/out-current
 	else
 		rm -f $ID/out-current
 	fi
 	(
 		if ! flock -xn 99
 		then
+			echo "$TASK ERR-001: flock failed"
 			[ "$DAIMON_EMAIL" = "NO" ] || echo | mail -s "$TASK ERR-001: flock failed" $EMAIL
+			exit
+		fi
+		set +e
+		timeout $TIMEOUT bash -c "$CMD" >> $ID/out-current 2>> $ID/out-current
+		let RTN=$?
+		set -e
+		if [ $RTN -eq 124 -o $RTN -eq 125 -o $RTN -eq 126 -o $RTN -eq 127 -o $RTN -eq 137 ]
+		then
+			echo "timeout returned $RTN" >> $ID/out-current
+		elif [ $RTN -ne 0 ]
+		then
+			echo "sub-command returned $RTN" >> $ID/out-current
+		fi
+		set +f
+		for STD in $(cd $ID && ls out-standard.* 2>/dev/null) out-standard
+		do
+			if diff $ID/out-current $ID/$STD > $ID/diff-$STD 2> /dev/null
+			then
+				break
+			fi
+		done
+		cd $ID && mv $(ls -rS diff-out-standard* | head -n 1) diff-current && rm -f diff-out-standard* 2> /dev/null
+		set -f
+		if [ -f $ID/diff-count ]
+		then
+			let FAILED_PRV=$(cat $ID/diff-count) || :
 		else
-			set +e
-			timeout $TIMEOUT bash -c "$CMD" >> $ID/out-current 2>> $ID/out-current
-			let RTN=$?
-			set -e
-			if [ $RTN -eq 124 -o $RTN -eq 125 -o $RTN -eq 126 -o $RTN -eq 127 -o $RTN -eq 137 ]
+			let FAILED_PRV=0 || :
+		fi
+		if [ -s $ID/diff-current ]
+		then
+			if [ $FAILED_PRV -gt 0 ] && diff -q $ID/diff-current $ID/diff-previous &> /dev/null
 			then
-				echo "timeout returned $RTN" >> $ID/out-current
-			elif [ $RTN -ne 0 ]
-			then
-				echo "sub-command returned $RTN" >> $ID/out-current
-			fi
-			set +f
-			for STD in $(cd $ID && ls out-standard.* 2>/dev/null) out-standard
-			do
-				if diff $ID/out-current $ID/$STD > $ID/diff-$STD 2> /dev/null
-				then
-					break
-				fi
-			done
-			cd $ID && mv $(ls -rS diff-out-standard* | head -n 1) diff-current && rm -f diff-out-standard* 2> /dev/null
-			set -f
-			if [ -f $ID/diff-count ]
-			then
-				let FAILED_PRV=$(cat $ID/diff-count) || :
+				let FAILED_CUR=$FAILED_PRV+1
 			else
-				let FAILED_PRV=0 || :
+				let FAILED_CUR=1
+				cp $ID/diff-current $ID/diff-previous
+				cp $ID/diff-current $ID/history-$(date +%FT%T)-abnm
 			fi
-			if [ -s $ID/diff-current ]
+			echo $FAILED_CUR > $ID/diff-count
+			if [ $FAILED_CUR -le $COUNT ]
 			then
-				if [ $FAILED_PRV -gt 0 ] && diff -q $ID/diff-current $ID/diff-previous &> /dev/null
+				if [ $FAILED_CUR -eq $COUNT -a $COUNT -gt 1 ]
 				then
-					let FAILED_CUR=$FAILED_PRV+1
+					SUBJECT="$TASK is detected (FINAL ALERT)"
 				else
-					let FAILED_CUR=1
-					cp $ID/diff-current $ID/diff-previous
-					cp $ID/diff-current $ID/history-$(date +%FT%T)-abnm
+					SUBJECT="$TASK is detected"
 				fi
-				echo $FAILED_CUR > $ID/diff-count
-				if [ $FAILED_CUR -le $COUNT ]
-				then
-					if [ $FAILED_CUR -eq $COUNT -a $COUNT -gt 1 ]
-					then
-						SUBJECT="$TASK is detected (FINAL ALERT)"
-					else
-						SUBJECT="$TASK is detected"
-					fi
-					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff-current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EMAIL
-				fi
-			else
-				if [ $FAILED_PRV -gt 0 ]
-				then
-					[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out-current | strings -n 1 2>&1 | mail -s "$TASK is back to normal" $EMAIL
-					echo $FAILED_PRV > $ID/history-$(date +%FT%T)-norm
-				fi
-				echo 0 > $ID/diff-count
-				rm -f $ID/diff-previous
+				[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/diff-current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EMAIL
 			fi
-		fi 
+		else
+			if [ $FAILED_PRV -gt 0 ]
+			then
+				[ "$DAIMON_EMAIL" = "NO" ] || cat $ID/out-current | strings -n 1 2>&1 | mail -s "$TASK is back to normal" $EMAIL
+				echo $FAILED_PRV > $ID/history-$(date +%FT%T)-norm
+			fi
+			echo 0 > $ID/diff-count
+			rm -f $ID/diff-previous
+		fi
 	) 99> $ID/lock
 fi
-
