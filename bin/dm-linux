@@ -217,6 +217,7 @@ class Sysinfo(Task):
 			self.cmds += [
 				f'[ ! -f /proc/net/bonding/bond0 ] || cat /proc/net/bonding/bond*',
 				f'ip -br a',
+				f'ip r',
 			]
 		elif param != 'netoff':
 			err_exit('ERR-107: wrong operand for --sysinfo')
