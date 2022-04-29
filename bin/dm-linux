@@ -429,6 +429,30 @@ class Lvs(Task):
 				return ''.join(fs)
 		return ln
 
+class Ceph(Task):
+	helpmsg = "check ceph filesystem health status with a threshold of usage percentage. Example: '--ceph 10P'"
+	metavar = 'THRESHOLD'
+	def __init__(self, param):
+		super().__init__()
+		if not param.endswith('P'):
+			err_exit('ERR-115: wrong operand for --ceph')
+		self.threshold = int(param[:-1])
+		self.cmds.append('ceph -s')
+		self.re_since = re.compile('since [0-9]+[a-z]')
+		self.re_age = re.compile('age [0-9]+[a-z]')
+	def getln(self, ln):
+		if ln.startswith('    client:'): return
+		if ln.startswith('    usage:'):
+			fs = ln.split()
+			if fs[6] != '/':
+				err_exit(f'ERR-114')
+			if 100 * int(fs[1]) / int(fs[7]) < self.threshold:
+				ln = '    usage: OK'
+			return ln
+		ln = self.re_since.sub('#', ln)
+		ln = self.re_age.sub('#', ln)
+		return ln
+
 def main():
 	args = get_args()
 	set_args_default(args)
