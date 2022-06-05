@@ -2,9 +2,7 @@
 
 'daimon' runs a sub-command specified in crontab, compares its output with the standard file(s) under the TASK directory under var/, records the history, and sends out email alert if user specifed so in /etc/daimon.conf if the output is different.
 
-'dm-report' reports all monitoring task status.
-
-'dm-check' checks the output of all abnormal tasks under current directory. User can choose to confirm the status is abnormal or a new normal.
+'dm-check' prints summary report or checks the abnormal tasks. User can choose to confirm the status is abnormal or a new normal.
 
 'dm-linux' prints storage usage, CPU load percentage, internal temperature, drive SMART attributes, file changes, directory permissions, LSI raid and Areca raid. It also supports custom commands.
 
@@ -28,8 +26,8 @@ dm-linux localhost -d 99P
 dm-linux localhost -d 1P:/
 daimon -t test/localhost -- dm-linux localhost -d 99P
 daimon -t test/localhost -- dm-linux localhost -d 1P:/
-dm-report -a
-dm-check -a
+dm-check -ar	#print summary report for all 
+dm-check -a		#check abnormal task
 ```
 
 ## Help
@@ -43,7 +41,7 @@ Contributions are always welcome!
 
 Developed by [Manhong Dai](mailto:manhongdai@gmail.com)
 
-Copyright © 2002-2021 University of Michigan 
+Copyright © 2002-2022 University of Michigan 
 
 Copyright © 2022 KLA, Corporation
 

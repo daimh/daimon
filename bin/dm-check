@@ -7,17 +7,49 @@ function helpme {
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220313
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220605
 	fi
-	PGID=$(cut -d ' ' -f 5 /proc/$$/stat)
-	kill -s TERM -- -$PGID
+	kill -s TERM -- -$(cut -d ' ' -f 5 /proc/$$/stat)
 }
-ALL=NO
-REMOVE=NO
-OPT_SHORT="hvar"
-OPT_LONG="help,version,all,remove"
-OPTS=$(getopt -o $OPT_SHORT --long $OPT_LONG -n "$(basename $0)" -- "$@")
-eval set -- "$OPTS"
+function report_then_quit {
+	CutFrom=$1
+	let TS=$(date +%s)
+	Header="Count\tTime\tTask"
+	find . -type f -name diff-count | sort | while read F;
+	do
+		diff -q $F <(echo 0) > /dev/null && continue 
+		if [ -f ${F::-11}/diff-previous ]
+		then
+			let T=$TS-$(ls -l --time-style='+%s' ${F::-11}/diff-previous | cut -d " " -f 6)
+			if [[ T -ge 86400 ]]
+			then
+				((T=T/86400))
+				T="${T}d"
+			elif [[ T -ge 3600 ]]
+			then
+				((T=T/3600))
+				T="${T}h"
+			elif [[ T -ge 60 ]]
+			then
+				((T=T/60))
+				T="${T}m"
+			else
+				T="${T}s"
+			fi
+		else
+			T=NA
+		fi
+		[ -z "$Header" ] || echo -e $Header && Header=""
+		echo -e "$(cat $F)\t$T\t$(realpath -s ${F::-11} |cut -c $CutFrom-)"
+	done 
+	exit
+}
+All=NO
+Report=NO
+OptShort="hvar"
+OptLong="help,version,all,remove"
+Opts=$(getopt -o $OptShort --long $OptLong -n "$(basename $0)" -- "$@")
+eval set -- "$Opts"
 while [ $# -gt 0 ]
 do
 	case "$1" in
@@ -35,10 +67,10 @@ do
 			set -x
 			shift ;;
 		-a | --all)	#check all tasks, regardless of current directory
-			ALL=YES
+			All=YES
 			shift ;;
-		-r | --remove)	#remove all history files under current directory
-			REMOVE=YES
+		-r | --report)	#print report
+			Report=YES
 			shift ;;
 		--)
 			shift
@@ -55,54 +87,49 @@ do
 #HELPME_END
 	esac
 done
-CONFIG=/etc/daimon.conf
-. $CONFIG || helpme "ERR-100: Configuration file $CONFIG is missing"
-[ -n "$DAIMON_HOME" ] || helpme "ERR-101: DAIMON_HOME is not defined in the configuration file $CONFIG"
-if [ "$ALL" = "YES" ]
+DaimonConf=/etc/daimon.conf
+. $DaimonConf || helpme "ERR-100: Configuration file $DaimonConf is missing"
+[ -n "$DaimonHome" ] || helpme "ERR-101: DaimonHome is not defined in the configuration file $DaimonConf"
+if [ "$All" = "YES" ]
 then
-	cd $DAIMON_HOME/var
-elif [[ $PWD != $DAIMON_HOME/var* ]]
+	cd $DaimonHome/var
+elif [[ $PWD != $DaimonHome/var* ]]
 then
-	helpme "ERR-102: cd to any directory under $DAIMON_HOME/var at first, or use '-a'"
+	helpme "ERR-102: cd to any directory under $DaimonHome/var at first, or use '-a'"
 fi
-if [ "$REMOVE" = "YES" ]
-then
-	find . -type f -name "history-*" -print -exec rm {} \;
-fi
-CUT=$(echo $DAIMON_HOME/var/ | wc -c)
+CutFrom=$(echo $DaimonHome/var/ | wc -c)
+[ "$Report" != "YES" ] || report_then_quit $CutFrom
 for f in $(find $* -type d | sort)
 do
 	[ -f $f/lock ] || continue
-	(
-		if ! flock -xn 99 
-		then
-			clear
-			read -n 1 -r -p "$f is locked, press any key to continue" 
-			exit
-		fi
-		[ ! -f $f/diff-count ] && exit
-		[ -f $f/diff-count ] && diff -q $f/diff-count <(echo 0) > /dev/null && exit
-		[ ! -f $f/out-current -o ! -f $f/out-standard ] && exit
-		[ -f $f/diff-current -a ! -s $f/diff-current ] && exit 
+	[ -f $f/diff-count ] || continue
+	! diff -q $f/diff-count <(echo 0) > /dev/null || continue
+	[ -f $f/out-current -a -f $f/out-standard ] || continue
+	while :
+	do
 		clear
 		set +o pipefail
-		diff $f/out-current $f/out-standard | less -FXP "$(realpath -s $f | cut -c $CUT-)"
+		diff $f/out-current $f/out-standard | less -FXP "$(realpath -s $f | cut -c $CutFrom-)"
 		set -o pipefail
-		while :
-		do
-			read -n 1 -r -p "Standardize '$(realpath -s $f | cut -c $CUT-)'? [y/nq]" ynq
-			case "$ynq" in
-				Y|y )
+		read -n 1 -r -p "Standardize '$(realpath -s $f | cut -c $CutFrom-)'? [y/nq]" ynq
+		case "$ynq" in
+			Y|y )
+				(
+					if ! flock -xn 99 
+					then
+						clear
+						exit 1
+					fi
 					mv $f/out-standard $f/history-$(date +%FT%T)-standard
 					cp $f/out-current $f/out-standard 
 					echo 0 > $f/diff-count
-					break;;
-				N|n|q )
-					break;;
-				* )
-					echo "Please answer y, n or q";;
-			esac
-		done
-		echo
-	) 99> $f/lock
+				) 99> $f/lock || read -n 1 -r -p "$f is lock, press any key to try again" 
+				break;;
+			N|n|q )
+				break;;
+			* )
+				echo "Please answer y, n or q";;
+		esac
+	done
+	echo
 done
