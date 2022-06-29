@@ -123,7 +123,7 @@ do
 					mv $f/out-standard $f/history-$(date +%FT%T)-standard
 					cp $f/out-current $f/out-standard 
 					echo 0 > $f/diff-count
-				) 99> $f/lock || read -n 1 -r -p "$f is lock, press any key to try again" 
+				) 99> $f/lock || read -n 1 -r -p "$f is locked, press any key to try again" 
 				break;;
 			N|n|q )
 				break;;
