@@ -17,7 +17,7 @@ function report_then_quit {
 	Header="Count\tTime\tTask"
 	find . -type f -name diff-count | sort | while read F;
 	do
-		diff -q $F <(echo 0) > /dev/null && continue 
+		diff -q $F <(echo 0) > /dev/null && continue
 		if [ -f ${F::-11}/diff-previous ]
 		then
 			let T=$TS-$(ls -l --time-style='+%s' ${F::-11}/diff-previous | cut -d " " -f 6)
@@ -41,7 +41,7 @@ function report_then_quit {
 		fi
 		[ -z "$Header" ] || echo -e $Header && Header=""
 		echo -e "$(cat $F)\t$T\t$(realpath -s ${F::-11} |cut -c $CutFrom-)"
-	done 
+	done
 	exit
 }
 All=NO
@@ -55,7 +55,7 @@ do
 	case "$1" in
 #HELPME_START
 #SYNOPSIS
-#	dm-check [OPTION]... 
+#	dm-check [OPTION]...
 #EXAMPLE
 #	cd /opt/daimon/var; dm-check
 #DESCRIPTION
@@ -109,22 +109,21 @@ do
 	do
 		clear
 		set +o pipefail
+		Md5sum=$(md5sum $f/out-current)
 		diff $f/out-current $f/out-standard | less -FXP "$(realpath -s $f | cut -c $CutFrom-)"
 		set -o pipefail
 		read -n 1 -r -p "Standardize '$(realpath -s $f | cut -c $CutFrom-)'? [y/nq]" ynq
+		echo
 		case "$ynq" in
 			Y|y )
 				(
-					if ! flock -xn 99 
-					then
-						clear
-						exit 1
-					fi
+					flock -xn 99 || exit 1
+					echo $Md5sum | md5sum -c | grep -qw OK || exit 1
 					mv $f/out-standard $f/history-$(date +%FT%T)-standard
-					cp $f/out-current $f/out-standard 
+					cp $f/out-current $f/out-standard
 					echo 0 > $f/diff-count
-				) 99> $f/lock || read -n 1 -r -p "$f is locked, press any key to try again" 
-				break;;
+				) 99> $f/lock && break || read -n 1 -r -p "$f is locked by another process, press any key to check it again"
+				continue;;
 			N|n|q )
 				break;;
 			* )
