@@ -131,11 +131,7 @@ then
 			helpme "Please answer y or n!"
 	esac
 fi
-if [ "$Set" = "all" ]
-then
-	! grep -q "^all:" $DmsshConf || helpme "ERR-008: 'all' is a reserved set name"
-	cat $DmsshConf > $Job-set
-elif grep -q ^$Set: $DmsshConf
+if grep -q ^$Set: $DmsshConf
 then
 	grep ^$Set: $DmsshConf > $Job-set
 else
