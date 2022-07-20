@@ -57,7 +57,7 @@ do
 		-h | --help)	#print help information
 			helpme ;;
 		--version)	#print version
-			helpme 20220312 ;;
+			helpme 20220719 ;;
 		-v )	#verbose output
 			set -x
 			shift ;;
@@ -114,6 +114,7 @@ Cmd="$*"
 [ $# -gt 0 ] || helpme "ERR-002: use -h/--help"
 [ -n "$Set" ] || helpme "ERR-003: parameter -s is missing"
 which parallel &> /dev/null || helpme "ERR-004: missing command 'parallel'"
+grep ^$Set: $DmsshConf > $Job-set || helpme "ERR-005: such set doesn't exist"
 set +e
 if [ "$Set" != "all" -a "$(join -v 2 <(grep ^$Set: $DmsshConf | cut -d '	' -f 2 |sed -e "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude) | wc -l )" != "0" ]
 then
@@ -130,12 +131,6 @@ then
 		* )
 			helpme "Please answer y or n!"
 	esac
-fi
-if grep -q ^$Set: $DmsshConf
-then
-	grep ^$Set: $DmsshConf > $Job-set
-else
-	helpme "ERR-005: such set doesn't exist"
 fi
 join -v 1 <( cut -d '	' -f 2 $Job-set | sed -e "s/,/\n/g" | sort -u ) <(sort -u $Job-exclude) > $Job-nodes
 message "####ssh to####"
