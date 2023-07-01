@@ -3,12 +3,11 @@
 import argparse
 import re
 import subprocess
-import sys
 import time
 
 
 def err_exit(msg):
-	print(f'\n{msg}', file=sys.stderr)
+	print(f'\n{msg}')
 	exit(1)
 
 
@@ -89,9 +88,14 @@ class Task():
 
 	def __init__(self):
 		self.cmds = []
+		self.exitcode = 0
 
 	def summary(self, prefix):
-		pass
+		return self.exitcode
+
+	def critical(self, ln):
+		self.exitcode = 255
+		return 'CRITICAL: ' + ln
 
 
 class DfCheck(Task):
@@ -129,8 +133,9 @@ class DfCheck(Task):
 			used = int(fs[4][:-1])
 			avail = fs[3]
 			if used >= self.threshold:
-				self.lns.append('%s\t%s\t%d%%\t%d%%\t%s\t%s' % (
+				self.lns.append('CRITICAL: %s\t%s\t%d%%\t%d%%\t%s\t%s' % (
 					size, avail, used, self.threshold, fs[5], fs[0]))
+				self.exitcode = 255
 			else:
 				self.lns.append('%s\t\tOK\t\t%s\t%s' % (size, fs[5], fs[0]))
 		except ValueError:
@@ -141,6 +146,7 @@ class DfCheck(Task):
 			print(f'{prefix}:\tSize\tAvail\tUsed%\tThreshold%\tMounted on\tFilesystem')
 		for ln in self.lns:
 			print(f'{prefix}:\t{ln}')
+		return self.exitcode
 
 
 class SmartCheck(Task):
@@ -197,9 +203,9 @@ class LoadCheck(Task):
 		loads = [float(s) for s in ln.split('load average: ')[1].split(', ')]
 		if self.check >= 0:
 			if max(loads) >= self.check:
-				return ln
+				return self.critical(ln)
 		elif min(loads) <= -self.check:
-			return ln
+			return self.critical(ln)
 
 
 class Command(Task):
@@ -234,7 +240,7 @@ class Temperature(Task):
 		m = self.re_p.match(ln)
 		if m is not None:
 			if float(ln[m.span()[1]:]) > self.check:
-				return ln
+				return self.critical(ln)
 
 
 class Stat(Task):
@@ -282,9 +288,8 @@ class AllowedTimeOffset(Task):
 	def getln(self, ln):
 		fs = [int(s) for s in ln.split(' - ')]
 		diff = fs[0] - fs[1]
-		if diff < self.check:
-			return
-		return f'{diff}'
+		if diff >= self.check:
+			return self.critical(str(diff))
 
 
 class Sysinfo(Task):
@@ -340,7 +345,7 @@ class Areca(Task):
 		if 'Ctrl Temperature' in ln or 'Controller Temp.' in ln:
 			idx = ln.rindex(': ') + 2
 			if int(ln[idx:ln.index(' ', idx)]) >= self.temperature:
-				return ln
+				return self.critical(ln)
 			return
 		if (
 			ln.startswith('[Controller H/W Monitor]') or
@@ -419,8 +424,13 @@ class Storcli(Task):
 						),
 						sep=''
 					)
+		return self.exitcode
 
 	def getln(self, ln):
+		if ln.startswith('Controller Status = '):
+			if ln.endswith(' = Optimal') or ln.endswith(' = OK'):
+				return ln
+			return self.critical(ln)
 		if ln.startswith('Drive /c') and ln.endswith(' Device attributes :'):
 			self.hdds.append([ln])
 		elif ln.startswith('SN = ') or ln.startswith('Raw size = '):
@@ -438,19 +448,17 @@ class Storcli(Task):
 		# Some old version of storcli returns Celcius.
 		if ln.startswith('ROC temperature(Degree Cel'):
 			if int(ln.split('=')[1]) >= self.temperature_roc:
-				return ln
+				return self.critical(ln)
 			return 'ROC temperature(Degree Celsius) = OK'
 		if ln.startswith('iBBU '):
 			ln = ' '.join(ln.split()[:2])
 			return ln
 		if ln.startswith('Drive Temperature ='):
-			if (
-				'N/A' in ln or
-				'C' not in ln or
-				int(ln.split('=')[1].split('C')[0]) >= self.temperature_drv
-			):
-				return ln
-			return 'Drive Temperature = OK'
+			if 'C' in ln:
+				if int(ln.split('=')[1].split('C')[0]) >= self.temperature_drv:
+					return self.critical(ln)
+				return 'Drive Temperature = OK'
+			return ln
 		if ln.startswith('CVPM0'):
 			m = re.compile(' [0-9]+C ').search(ln)
 			if m is not None:
@@ -486,7 +494,7 @@ class Storcli(Task):
 
 class Megacli(Task):
 	helpmsg = "use legacy 'megacli' to check LSI raid card with a drive" \
-		"temperature alert threshold. Example: '--megacli 50C'"
+		" temperature alert threshold. Example: '--megacli 50C'"
 	metavar = 'TEMPERATURE'
 
 	def __init__(self, param):
@@ -507,7 +515,7 @@ class Megacli(Task):
 class Nvidia(Task):
 	helpmsg = "check NVIDIA card with a utilization percentage, a" \
 		"temperature threshold, and a power draw. Example: '--nvidia 50P:90C:40W'"
-	metavar = 'TEMPERATURE:POWER'
+	metavar = 'PERCENTAGE:TEMPERATURE:POWER'
 
 	def __init__(self, param):
 		super().__init__()
@@ -551,13 +559,15 @@ class Nvidia(Task):
 		if ln.endswith('MiB'):
 			if 'Free' in ln or 'Used' in ln:
 				return
-		elif ln.startswith('        GPU Current Temp'):
+		if ln.startswith('        GPU Current Temp'):
 			if int(ln[ln.index(':')+1:ln.rindex('C')]) < self.temperature:
 				return '        GPU Current Temp                  : OK'
-		elif ln.startswith('        Power Draw'):
+			return self.critical(ln)
+		if ln.startswith('        Power Draw'):
 			if float(ln[ln.index(':')+1:ln.rindex('W')]) < self.power:
 				return '        Power Draw                        : OK'
-		elif ln.startswith('    Utilization'):
+			return self.critical(ln)
+		if ln.startswith('    Utilization'):
 			self.utilization_amid = True
 		elif self.utilization_amid:
 			if not ln.startswith('        '):
@@ -566,7 +576,8 @@ class Nvidia(Task):
 				ifrom = ln.index(':')+1
 				ito = ln.rindex('%')
 				if int(ln[ifrom:ito]) < self.utilization:
-					ln = ln[:ifrom] + ' OK'
+					return ln[:ifrom] + ' OK'
+				return self.critical(ln)
 		return ln
 
 
@@ -596,6 +607,7 @@ class Lvs(Task):
 				fs[6] = 'OK'.rjust(len(fs[6]), ' ')
 				fs[7] = 'OK'.rjust(len(fs[7]), ' ')
 				return ''.join(fs)
+			return self.critical(ln)
 		return ln
 
 
@@ -617,6 +629,10 @@ class Ceph(Task):
 	def getln(self, ln):
 		if self.all_done:
 			return
+		if ln.startswith('    health:'):
+			if ln.endswith('HEALTH_OK'):
+				return ln
+			return self.critical(ln)
 		if ln.startswith('    objects:'):
 			return
 		if ln.startswith('    usage:'):
@@ -661,6 +677,7 @@ def main():
 	)
 	sshout = p.communicate()[0].decode('utf-8', 'ignore')
 	failed = 0
+	exitcode = 0
 	for ln in sshout.split('\n'):
 		fs = ln.split(':\t', 1)
 		if len(fs) == 1:
@@ -668,7 +685,8 @@ def main():
 		prefix, ln = fs[0], fs[1].rstrip()
 		if prefix.endswith(':summary'):
 			prfx = prefix[:-8]
-			tasks[prfx].summary(prfx)
+			if tasks[prfx].summary(prfx) == 255:
+				exitcode = 255
 		elif ':exit:' in prefix:
 			if not prefix.endswith(':exit:0'):
 				failed += 1
@@ -681,6 +699,8 @@ def main():
 		err_exit(f'ERR-116: {failed} command(s) failed!')
 	if p.returncode != 0:
 		err_exit(f'ERR-101: ssh failed with code {p.returncode}!')
+	if exitcode != 0:
+		err_exit(f'ERR-255: CRITICAL alert found')
 
 
 if __name__ == '__main__':
