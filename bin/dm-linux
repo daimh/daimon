@@ -287,7 +287,7 @@ class AllowedTimeOffset(Task):
 
 	def getln(self, ln):
 		fs = [int(s) for s in ln.split(' - ')]
-		diff = fs[0] - fs[1]
+		diff = abs(fs[0] - fs[1])
 		if diff >= self.check:
 			return self.critical(str(diff))
 

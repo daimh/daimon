@@ -1,29 +1,39 @@
 #!/usr/bin/env python3
-#Author Manhong Dai, MNI, U of Michigan
-import socket, sys, telnetlib, argparse
+# Author Manhong Dai, MNI, U of Michigan
+import argparse
+import socket
+import sys
+import telnetlib
+
+
 def read_status(s, result):
 	idx = s.find(':')
-	if idx == -1: return
+	if idx == -1:
+		return
 	key, value = s[:idx].strip(), s[idx+1:].strip()
-	if key == 'U1': #20.0C:OK
+	if key == 'U1':  # 20.0C:OK
 		value = value.replace('C', ' C').replace(':', ' ')
-	elif key == 'Runtime Remaining': #24 hr 0 min 0 sec
+	elif key == 'Runtime Remaining':  # 24 hr 0 min 0 sec
 		fs = value.split()
 		if len(fs) == 6:
-			if fs[1] != 'hr'  or fs[3] != 'min' or fs[5] != 'sec': raise Exception('ERR-100')
+			if fs[1] != 'hr' or fs[3] != 'min' or fs[5] != 'sec':
+				raise Exception('ERR-100')
 			value = f'{int(fs[0]) * 60 + int(fs[2])} min'
 		elif len(fs) == 2:
-			if fs[1] != 'min': raise Exception('ERR-101')
-	elif key == 'Battery Temperature': #20.0 C, 68.0 F
+			if fs[1] != 'min':
+				raise Exception('ERR-101')
+	elif key == 'Battery Temperature':  # 20.0 C, 68.0 F
 		value = value[:value.index(',')]
 	result[key] = value
+
+
 def get_args_opts():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-V", "--version", action='version', version='20220128')
 	parser.add_argument("-u", "--username", required=True)
 	parser.add_argument("-p", "--password", required=True)
 	parser.add_argument("ups")
-#3.5.8
+	# 3.5.8
 	parser.add_argument("--ups-firmware")
 	parser.add_argument("--Apparent-Load-Power", metavar=':MAX')
 	parser.add_argument("--Battery-Temperature", metavar=':MAX')
@@ -44,16 +54,16 @@ def get_args_opts():
 	parser.add_argument("--Runtime-Remaining", metavar='MIN:')
 	parser.add_argument("--Self-Test-Date", dest='Self-Test_Date', metavar='ANY')
 	parser.add_argument("--Next-Battery-Replacement-Date", metavar='ANY')
-#6.6.4
+	# 6.6.4
 	parser.add_argument("--U1", metavar='MIN:MAX')
-#
+
 	args = parser.parse_args()
 	opts = {}
 	for k, v in vars(args).items():
-		if k in [ 'ups', 'ups_firmware', 'username', 'password']:
+		if k in ['ups', 'ups_firmware', 'username', 'password']:
 			continue
 		min_max = v
-		if min_max == None:
+		if min_max is None:
 			continue
 		elif min_max[0] == ':':
 			min_max = [None, float(min_max[1:])]
@@ -63,9 +73,11 @@ def get_args_opts():
 			min_max = [float(s) for s in min_max.split(':')]
 		opts[k.replace('_', ' ')] = min_max
 	return args, opts
+
+
 def get_status(args, opts):
 	tn = telnetlib.Telnet(args.ups)
-#	tn.set_debuglevel(10)
+	# tn.set_debuglevel(10)
 	tn.read_until(b'User Name :')
 	tn.write(f'{args.username}\r'.encode('ascii'))
 	tn.read_until(b'Password  :')
@@ -83,15 +95,18 @@ def get_status(args, opts):
 		for ln in status.decode("utf-8").split('\n'):
 			read_status(ln, result)
 	elif args.ups_firmware == '3.5.8':
-		tn.read_until(b'     <ESC>- Main Menu, <ENTER>- Refresh, <CTRL-L>- Event Log')
+		tn.read_until(
+			b'     <ESC>- Main Menu, <ENTER>- Refresh, <CTRL-L>- Event Log')
 		tn.write(b'1\r')
 		tn.read_until(b'     <ESC>- Back, <ENTER>- Refresh, <CTRL-L>- Event Log')
 		tn.write(b'1\r')
-		status = tn.read_until(b'     <ESC>- Back, <ENTER>- Refresh, <CTRL-L>- Event Log')
+		status = tn.read_until(
+			b'     <ESC>- Back, <ENTER>- Refresh, <CTRL-L>- Event Log')
 		tn.write(b'\x1b')
 		tn.read_until(b'     <ESC>- Back, <ENTER>- Refresh, <CTRL-L>- Event Log')
 		tn.write(b'\x1b')
-		tn.read_until(b'     <ESC>- Main Menu, <ENTER>- Refresh, <CTRL-L>- Event Log')
+		tn.read_until(
+			b'     <ESC>- Main Menu, <ENTER>- Refresh, <CTRL-L>- Event Log')
 		tn.write(b'4\r')
 		tn.read_until(b'Connection Closed - Bye')
 		tn.close()
@@ -104,6 +119,8 @@ def get_status(args, opts):
 	else:
 		raise Exception('ERR-003: unsupported UPS firmware version')
 	return result
+
+
 def main():
 	args, opts = get_args_opts()
 	result = get_status(args, opts)
@@ -111,18 +128,20 @@ def main():
 		min_max = opts.pop(key, None)
 		if min_max == 'ANY':
 			continue
-		elif min_max != None:
+		elif min_max is not None:
 			number = float(val[:val.index(' ')])
-			if min_max[0] == None:
+			if min_max[0] is None:
 				if number <= min_max[1]:
 					val = '<=%g%s' % (min_max[1], val[val.index(' '):])
-			elif min_max[1] == None:
+			elif min_max[1] is None:
 				if number >= min_max[0]:
 					val = '>=%g%s' % (min_max[0], val[val.index(' '):])
-			else:
-				if number >= min_max[0] and number <= min_max[1]:
-					val = '%g-%g%s' % (min_max[0], min_max[1], val[val.index(' '):])
+			elif number >= min_max[0] and number <= min_max[1]:
+				val = '%g-%g%s' % (min_max[0], min_max[1], val[val.index(' '):])
 		print('%-20s:' % key, val)
 	if len(opts) > 0:
 		raise Exception('ERR-004: wrong option: ' + str(opts))
-if __name__ == '__main__': main()
+
+
+if __name__ == '__main__':
+	main()
