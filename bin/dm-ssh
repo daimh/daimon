@@ -30,14 +30,16 @@ fi
 List=NO
 Delay=0
 Timeout=2
-OptShort="hvlu:s:e:E:H:j:d:t:"
-OptLong="help,version,list,user:set:,exclude-hosts:,exclude-sets:,header:,jobs:delay:timeout:"
+OptShort="hvlu:s:n:e:E:H:j:d:t:"
+OptLong="help,version,list,user:set:,include-hosts:,exclude-hosts:,exclude-sets:,header:,jobs:delay:timeout:"
 Opts=$(getopt -o $OptShort --long $OptLong -n dm-ssh -- "$@")
 HeaderLines=0
 SshUser=$USER
 Job=$(mktemp /tmp/dm-ssh-XXXX )
 [ -n "$Job" ] || helpme "ERR-007: failed to create temp file"
 Parallel=0
+Set=""
+IncludeHosts=""
 echo -n > $Job-exclude
 eval set -- "$Opts"
 while [ $# -gt 0 ]
@@ -57,18 +59,21 @@ do
 		-h | --help)	#print help information
 			helpme ;;
 		--version)	#print version
-			helpme 20220924 ;;
+			helpme 20230720 ;;
 		-v )	#verbose output
 			set -x
 			shift ;;
 		-l | --list)	#list all sets and their hosts
 			List=YES
 			shift ;;
-		-u | --user)	#user name used to connect to the nodes
+		-u | --user)	#user name used to connect to the hosts
 			SshUser=$2
 			shift 2 ;;
 		-s | --set)	#host set name defined in output of '-l'
 			Set=$2
+			shift 2 ;;
+		-n | --include-hosts)	#a list of host name. E.g. host-1,host-2
+			IncludeHosts=$2
 			shift 2 ;;
 		-e | --exclude-hosts)	#exclude hosts. E.g. host-1,host-2
 			echo $2 | sed -e "s/,/\n/g" >> $Job-exclude
@@ -112,14 +117,16 @@ then
 fi
 Cmd="$*"
 [ $# -gt 0 ] || helpme "ERR-002: use -h/--help"
-[ -n "$Set" ] || helpme "ERR-003: parameter -s is missing"
 which parallel &> /dev/null || helpme "ERR-004: missing command 'parallel'"
-grep ^$Set: $DmsshConf > $Job-set || helpme "ERR-005: such set doesn't exist"
+rm -f $Job-set
+[ -z "$Set" ] || grep ^$Set: $DmsshConf >> $Job-set || helpme "ERR-005: such set doesn't exist"
+[ -z "$IncludeHosts" ] || echo "$IncludeHosts" >> $Job-set
+[ -s "$Job-set" ] || helpme "ERR-003: parameter -s or -n is missing"
 set +e
-if [ "$Set" != "all" -a "$(join -v 2 <(grep ^$Set: $DmsshConf | cut -d '	' -f 2 |sed -e "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude) | wc -l )" != "0" ]
+if [ "$Set" != "all" -a "$(join -v 2 <( (grep ^$Set: $DmsshConf | cut -d '	' -f 2 && echo $IncludeHosts ) |sed -e "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude) | wc -l )" != "0" ]
 then
 	join -v 2 <(grep ^$Set: $DmsshConf | cut -d '	' -f 2 |sed -e "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude)
-	read -n 1 -r -p "The nodes above are excluded, but they are not in the node set \"$Set\", you might want to fix your -e/E. continue? [y/N]" yn
+	read -n 1 -r -p "The hosts above are excluded, but they are not in the node set \"$Set\", you might want to fix your -e/E. continue? [y/N]" yn
 	case "$yn" in
 		Y|y )
 			echo
