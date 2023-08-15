@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeufo pipefail
+set -Eeuo pipefail
 trap "exit 1" TERM
 function helpme {
 	if [ $# -gt 0 ]
