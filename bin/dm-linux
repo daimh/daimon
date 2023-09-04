@@ -304,6 +304,7 @@ class Sysinfo(Task):
 			f'head -n 1 /proc/meminfo',
 			f'[ ! -f /proc/mdstat ] || grep -v bitmap: /proc/mdstat',
 			f'[ ! -f /proc/drbd ] || drbdadm status',
+			f'grep -H "" /sys/class/net/*/speed 2> /dev/null || true',
 		]
 		if param is None:
 			self.cmds += [

@@ -43,7 +43,7 @@ Fan Meng, Ph.D., Research Associate Professor, Psychiatry, UMICH
 
 Ruth Freedman, MPH, former administrator of MNI, UMICH
 
-Julie Gales, administrator of MNI, UMICH
+Julie Gales, Administrative Director, MNI, UMICH
 
 Andy Lin, MNI, UMICH
 
