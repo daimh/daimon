@@ -305,7 +305,7 @@ class Sysinfo(Task):
 			f'[ ! -f /proc/mdstat ] || grep -v bitmap: /proc/mdstat',
 			f'[ ! -f /proc/drbd ] || drbdadm status',
 			f'grep -H "" /sys/class/net/*/speed 2> /dev/null || true',
-			f'ipmitool lan print || true',
+			f'ipmitool lan print | grep "^IP Address" || true',
 		]
 		if param is None:
 			self.cmds += [
