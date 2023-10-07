@@ -302,7 +302,7 @@ class Sysinfo(Task):
 		self.cmds += [
 			f'uname -a',
 			f'head -n 1 /proc/meminfo',
-			f'[ ! -f /proc/mdstat ] || grep -v bitmap: /proc/mdstat',
+			f'grep -H ^ /sys/devices/virtual/block/md*/md/degraded /sys/devices/virtual/block/md*/md/sync_completed 2> /dev/null || true',
 			f'[ ! -f /proc/drbd ] || drbdadm status',
 			f'grep -H "" /sys/class/net/*/speed 2> /dev/null || true',
 			f'ipmitool lan print | grep "^IP Address" || true',
@@ -315,12 +315,16 @@ class Sysinfo(Task):
 			]
 		elif param != 'netoff':
 			err_exit('ERR-107: wrong operand for --sysinfo')
-		self.re_p = re.compile(r'md[0-9]+ : ')
 
 	def getln(self, ln):
-		if self.re_p.match(ln):
-			fs = ln.split(' ')
-			ln = ' '.join(fs[:4] + sorted(fs[4:]))
+		if ln.startswith('/sys/devices/virtual/block/md'):
+			if 'degraded:' in ln:
+				if not ln.endswith('degraded:0'):
+					return self.critical(ln)
+			elif 'sync_completed:' in ln:
+				if not ln.endswith(':none'):
+					fs = [float(s) for s in ln.split(':')[1].split('/')]
+					ln = ln + '\t= {0:.1f}%'.format(100 * fs[0] / fs[1])
 		return ln
 
 
