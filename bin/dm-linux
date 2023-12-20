@@ -340,8 +340,8 @@ class Areca(Task):
 		if len(fs) != 2 or fs[0][-1] != 'C':
 			err_exit('ERR-106: wrong operand for --areca')
 		self.temperature = int(fs[0][:-1])
-		cli64 = '%s\nquit' % '\n'.join([
-			'set curctrl=%d\nhw info\nvsf info\ndisk info' % (idx+1)
+		cli64 = '%s\\nquit' % '\\n'.join([
+			'set curctrl=%d\\nhw info\\nvsf info\\ndisk info' % (idx+1)
 			for idx in range(int(fs[1]))
 		])
 		self.cmds.append(f'echo -e "{cli64}" | (cli64 | strings -n 1 || true)')
@@ -685,8 +685,11 @@ def main():
 	failed = 0
 	exitcode = 0
 	for ln in sshout.split('\n'):
+		if ln == "":
+			continue
 		fs = ln.split(':\t', 1)
 		if len(fs) == 1:
+			print(f'STDERR:\t{ln}')
 			continue
 		prefix, ln = fs[0], fs[1].rstrip()
 		if prefix.endswith(':summary'):
