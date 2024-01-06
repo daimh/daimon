@@ -73,7 +73,7 @@ def add_class_to_task(cls, args, tasks):
 		wrapper = []
 		for c in tsk.cmds:
 			wrapper.append(
-				f'(set -Ee; {c}) 2>&1 | sed -e "s/^/{prefix}:\t/";'
+				f'(set -Ee; {c}) 2>&1 | sed "s/^/{prefix}:\t/";'
 			)
 			if c.startswith('date '):
 				c = 'date'
@@ -165,7 +165,7 @@ class SmartCheck(Task):
 		self.check = list(set(self.check))
 		for drv in fs[0].split(','):
 			self.cmds.append(
-				f'(smartctl -iH /dev/{drv} || :) | tail -n +4 |sed -e "s/^/{drv}:\t/"'
+				f'(smartctl -iH /dev/{drv} || :) | tail -n +4 |sed "s/^/{drv}:\t/"'
 			)
 
 	def getln(self, ln):
@@ -182,7 +182,7 @@ class Dmesg(Task):
 
 	def __init__(self, param):
 		super().__init__()
-		self.cmds.append(f'dmesg -T | grep -E "{param}" || true')
+		self.cmds.append(f'dmesg -T | grep -E "{param}" ||:')
 
 	def getln(self, ln):
 		return ln
@@ -293,7 +293,7 @@ class AllowedTimeOffset(Task):
 
 
 class Sysinfo(Task):
-	helpmsg = "check some standard system information. It supports only" \
+	helpmsg = "check standard system information. It supports only" \
 		"'netoff', which turns off network checking. Example: '--sysinfo netoff'"
 	metavar = 'SWITCH'
 
@@ -302,10 +302,12 @@ class Sysinfo(Task):
 		self.cmds += [
 			f'uname -a',
 			f'head -n 1 /proc/meminfo',
-			f'grep -H ^ /sys/devices/virtual/block/md*/md/degraded /sys/devices/virtual/block/md*/md/sync_completed 2> /dev/null || true',
+			f'grep -H ^ /sys/devices/virtual/block/md*/md/degraded'
+			' /sys/devices/virtual/block/md*/md/sync_completed 2> /dev/null ||:',
 			f'[ ! -f /proc/drbd ] || drbdadm status',
-			f'grep -H "" /sys/class/net/*/speed 2> /dev/null || true',
-			f'ipmitool lan print | grep "^IP Address" || true',
+			f'grep -H "" /sys/class/net/*/speed 2> /dev/null ||:',
+			f'ipmitool lan print | grep "^IP Address" ||:',
+			f'ipmitool sdr list |sed "s/^/IPMISDR:\t/" ||:',
 		]
 		if param is None:
 			self.cmds += [
@@ -325,6 +327,12 @@ class Sysinfo(Task):
 				if not ln.endswith(':none'):
 					fs = [float(s) for s in ln.split(':')[1].split('/')]
 					ln = ln + '\t= {0:.1f}%'.format(100 * fs[0] / fs[1])
+		elif ln.startswith('IPMISDR:\t'):
+			ln = ln[9:]
+			fs = ln.split('|', maxsplit=3)
+			if fs[2] == ' ok':
+				fs[1] = ' ok'.ljust(len(fs[1]))
+				ln = '|'.join(fs)
 		return ln
 
 
@@ -344,7 +352,7 @@ class Areca(Task):
 			'set curctrl=%d\\nhw info\\nvsf info\\ndisk info' % (idx+1)
 			for idx in range(int(fs[1]))
 		])
-		self.cmds.append(f'echo -e "{cli64}" | (cli64 | strings -n 1 || true)')
+		self.cmds.append(f'echo -e "{cli64}" | (cli64 | strings -n 1 ||:)')
 		self.printit = True
 
 	def getln(self, ln):
@@ -683,7 +691,7 @@ def main():
 	)
 	sshout = p.communicate()[0].decode('utf-8', 'ignore')
 	failed = 0
-	exitcode = 0
+	critical = False
 	for ln in sshout.split('\n'):
 		if ln == "":
 			continue
@@ -695,21 +703,22 @@ def main():
 		if prefix.endswith(':summary'):
 			prfx = prefix[:-8]
 			if tasks[prfx].summary(prfx) == 255:
-				exitcode = 255
+				critical = True
 		elif ':exit:' in prefix:
 			if not prefix.endswith(':exit:0'):
+				ln = f'CRITICAL: {ln}'
 				failed += 1
 		else:
 			ln = tasks[prefix].getln(ln)
 			if ln is None:
 				continue
 		print(f'{prefix}:\t{ln}')
-	if failed != 0:
+	if failed > 0:
 		err_exit(f'ERR-116: {failed} command(s) failed!')
+	if critical:
+		err_exit(f'ERR-255: critical alert found')
 	if p.returncode != 0:
 		err_exit(f'ERR-101: ssh failed with code {p.returncode}!')
-	if exitcode != 0:
-		err_exit(f'ERR-255: CRITICAL alert found')
 
 
 if __name__ == '__main__':

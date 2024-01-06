@@ -6,10 +6,12 @@ function helpme {
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220605
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' \
+			| grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2
 	fi
-	kill -s TERM -- -$(cut -d ' ' -f 5 /proc/$$/stat)
+	kill 0
 }
+
 DaimonConf=/etc/daimon.conf
 . $DaimonConf || helpme "ERR-100: Configuration file $DaimonConf is missing"
 Args="$*"

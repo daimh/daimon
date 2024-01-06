@@ -6,10 +6,12 @@ function helpme {
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' | grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2 #20220605
+		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' \
+			| grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2
 	fi
-	kill -s TERM -- -$(cut -d ' ' -f 5 /proc/$$/stat)
+	kill 0
 }
+
 function readable_time {
 	if [ -f $1 ]
 	then
@@ -34,6 +36,7 @@ function readable_time {
 		echo ${Ts}s
 	fi
 }
+
 function report_then_quit {
 	CutFrom=$1
 	[ "$Report" != "JSON" ] || echo '{ "version":"1.0", "alerts": {'
@@ -62,6 +65,7 @@ function report_then_quit {
 	[ "$Report" != "JSON" ] || echo '}}'
 	exit
 }
+
 All=NO
 Report=NO
 Ignore=NO
