@@ -148,7 +148,7 @@ do
 					continue;;
 			esac
 		fi
-		less -RKFXP "$Task" < $Tempfile
+		GREP_COLORS='ms=01;33:mc=01;31:sl=:cx=:fn=35:ln=32:bn=32:se=36' grep --color=always -e ^ -e "CRITICAL:.*" $Tempfile | less -RKFXP "$Task"
 		rm $Tempfile
 		[ "$Ignore" = "YES" ] || [ -z "$Admin" ] || diff -q <(echo 0) $f/out-exitcode &> /dev/null || Admin=""
 		read -n 1 -r -p "$Task: $(readable_time $f/diff-previous) ago, $(cat $f/diff-count) times. Next[q]$Admin? " Ans

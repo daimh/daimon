@@ -43,7 +43,7 @@ do
 		-t | --task)	#NAME of a sub-directory under $DaimonVar
 			Task=$2
 			shift 2 ;;
-		-m | --mail)	#EMAIL addresses the alerts will be sent to, seperated by comma, default $USER
+		-m | --mail)	#EMAIL addresses the alerts will be sent to, seperated by comma, default $USER, "NO" disables it
 			EmailTo=$(echo $2 | sed -e "s/,/ /g")
 			shift 2 ;;
 		-n | --count)	#up to COUNT alerts will be sent for a new incident, default 1
@@ -92,7 +92,7 @@ fi
 	if ! flock -xn 99
 	then
 		Msg="$Task ERR-001: flock failed"
-		[ "$DaimonEmail" = "NO" ] || echo | mail -s "$Msg" $EmailTo
+		[ "$EmailTo" = "NO" ] || echo | mail -s "$Msg" $EmailTo
 		helpme "$Msg"
 	fi
 	set +e
@@ -111,7 +111,7 @@ fi
 		fi
 		mv $Dir/out-current $Dir/out-standard
 		cat $Dir/out-standard
-		[ "$DaimonEmail" = "NO" ] || cat $Dir/out-standard | mail -s "$Task is initalized successfully. If the command output is not right, let admins know it" $EmailTo
+		[ "$EmailTo" = "NO" ] || cat $Dir/out-standard | mail -s "$Task is initalized successfully. If the command output is not right, let admins know it" $EmailTo
 	else
 		if [ $Rtn -eq 124 -o $Rtn -eq 125 -o $Rtn -eq 126 -o $Rtn -eq 127 -o $Rtn -eq 137 ]
 		then
@@ -151,16 +151,16 @@ fi
 			then
 				if [ $FailedCountCur -eq $Count -a $Count -gt 1 ]
 				then
-					SUBJECT="$Task is detected (FINAL ALERT)"
+					Subject="$Task is detected (FINAL ALERT)"
 				else
-					SUBJECT="$Task is detected"
+					Subject="$Task is detected"
 				fi
-				[ "$DaimonEmail" = "NO" ] || cat $Dir/diff-current | strings -n 1 2>&1 | mail -s "$SUBJECT" $EmailTo
+				[ "$EmailTo" = "NO" ] || cat $Dir/diff-current | strings -n 1 2>&1 | mail -s "$Subject" $EmailTo
 			fi
 		else
 			if [ $FailedCntPrv -gt 0 ]
 			then
-				[ "$DaimonEmail" = "NO" ] || cat $Dir/out-current | strings -n 1 2>&1 | mail -s "$Task is back to normal" $EmailTo
+				[ "$EmailTo" = "NO" ] || cat $Dir/out-current | strings -n 1 2>&1 | mail -s "$Task is back to normal" $EmailTo
 				echo $FailedCntPrv > $Dir/history-$(date +%FT%T)-norm
 			fi
 			echo 0 > $Dir/diff-count
