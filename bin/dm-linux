@@ -115,15 +115,16 @@ class DfCheck(Task):
 		if not self.threshold.endswith('P'):
 			err_exit('ERR-109: wrong operand for --dfcheck')
 		self.threshold = int(self.threshold[:-1])
+		df_cmd = 'df -h --output=fstype,size,used,avail,pcent,target'
 		for mp in mountpoints.split(','):
 			if mp == '':
-				cmd = f'df -hP'
+				cmd = df_cmd
 			elif mp == 'LOCAL':
-				cmd = f'df -hPl'
+				cmd = f'{df_cmd} -l'
 			elif not mp.startswith('/'):
-				cmd = f'df -hPt {mp}'
+				cmd = f'{df_cmd} -t {mp}'
 			else:
-				cmd = f'mountpoint {mp} &> /dev/null && df -hP {mp}'
+				cmd = f'mountpoint -q {mp} && {df_cmd} {mp}'
 			self.cmds.append(f'{cmd} | tail -n +2 | grep -v /run/user')
 
 	def getln(self, ln):
@@ -133,17 +134,17 @@ class DfCheck(Task):
 			used = int(fs[4][:-1])
 			avail = fs[3]
 			if used >= self.threshold:
-				self.lns.append('CRITICAL: %s\t%s\t%d%%\t%d%%\t%s\t%s' % (
-					size, avail, used, self.threshold, fs[5], fs[0]))
+				self.lns.append('%s\t%s\t%s\tCRITICAL: %d%%\t%d%%\t%s' % (
+					fs[0], size, avail, used, self.threshold, fs[5]))
 				self.exitcode = 255
 			else:
-				self.lns.append('%s\t\tOK\t\t%s\t%s' % (size, fs[5], fs[0]))
+				self.lns.append('%s\t%s\tOK\tOK\tOK\t%s' % (fs[0], size, fs[5]))
 		except ValueError:
 			return ln
 
 	def summary(self, prefix):
 		if prefix.endswith(':0'):
-			print(f'{prefix}:\tSize\tAvail\tUsed%\tThreshold%\tMounted on\tFilesystem')
+			print(f'{prefix}:\tType\tSize\tAvail\tUsed%\tTh%\tMounted on')
 		for ln in self.lns:
 			print(f'{prefix}:\t{ln}')
 		return self.exitcode
