@@ -7,7 +7,7 @@ function helpme {
 		echo -e "$1" 1>&2
 	else
 		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' \
-			| grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2
+			| grep -v "^#HELPME_" | sed "s/#//" | tr -s '\t' 1>&2
 	fi
 	kill 0
 }
@@ -213,12 +213,12 @@ seq $Total |parallel -k -j $Parallel --colsep '\t' "
 [ "$Quiet" = "Yes" ] ||message -e "####Output####"
 set +f
 TailLines=1
-while read C L
+while read -r C L
 do
 	[ "$C" = "$Total" ] ||break
 	((TailLines++))
 	echo "LINE:$L"
-done < <(for F in $Job-host-*; do head -n -1 $F |nl -ba -w1; done |sort -n |uniq -c |sed -e "s/^ \+//")
+done < <(for F in $Job-host-*; do head -n -1 $F |nl -ba -w1; done |sort -n |uniq -c |sed "s/^ \+//")
 FailedHosts=()
 SucceededHosts=()
 for F in $Job-host-*
