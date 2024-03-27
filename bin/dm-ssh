@@ -64,7 +64,7 @@ do
 		-h |--help)	#print help information
 			helpme ;;
 		--version)	#print version
-			helpme 20231118 ;;
+			helpme 20240327 ;;
 		-v)	#verbose output
 			set -x
 			shift ;;
@@ -173,22 +173,24 @@ MaxWidth=$(cat $Job-nodes |wc -L)
 if [ -t 1 ]
 then
 	TailWidth=$(($(tput cols) - $MaxWidth))
+	tabs $MaxWidth
 else
 	TailWidth=80
+	Quiet=Yes
 fi
-tabs $MaxWidth
 Total=$(cat $Job-nodes |wc -l)
 if [ "$Quiet" != "Yes" ]
 then
 	message "####$Basename####"
 fi
+[ "$Quiet" = "Yes" ] ||echo -ne "\r1/$Total:\t$(head -n 1 $Job-nodes)"
 SshOpts='-o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p" -o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error -o StrictHostKeyChecking=no -o BatchMode=yes' 
 seq $Total |parallel -k -j $Parallel --colsep '\t' "
 	sleep \$(bc <<< \"scale=3; $Delay*\$RANDOM/32768\" )
 	Node=\$(sed '{1}q;d' $Job-nodes)
 	if [ $Basename = dm-ssh ]
 	then
-		ssh -n $SshOpts $SshUser@\$Node \"$Cmd\" &> $Job-host-\$Node
+		ssh $SshOpts $SshUser@\$Node <<< \"$Cmd\" &> $Job-host-\$Node
 	else
 		scp -qpr $SshOpts ${Files[@]} $SshUser@\$Node:$Dir &> $Job-host-\$Node
 	fi
@@ -254,7 +256,7 @@ if [ ${#FailedHosts[@]} -gt 0 ]
 then
 	message "####Failed####"
 	echo -e "${#FailedHosts[@]}/$Total:\t${FailedHosts[*]}"
-	tabs 8
+	[ ! -t 1 ] ||tabs 8
 	exit 166
 fi
-tabs 8
+[ ! -t 1 ] ||tabs 8
