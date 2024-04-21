@@ -39,30 +39,44 @@ function readable_time {
 
 function report_then_quit {
 	CutFrom=$1
-	[ "$Report" != "JSON" ] || echo '{ "version":"1.0", "alerts": {'
+	if [ "$Report" = "JSON" ]
+	then
+		echo '{ "version":"1.0", "alerts": {'
+	elif [ "$Report" != "TXT" ]
+	then
+		helpme "ERR-103: unsupported report format"
+	fi
 	! ((Row=0))
-	find . -type f -name diff-count | sort | while read F;
+	! ((Ok=0))
+	while read F
 	do
 		Cnt=$(cat $F)
-		[ -n "$Cnt" -a "$Cnt" != "0" ] || continue
+		if [ "$Cnt" = "0" ];
+		then
+			((Ok+=1))
+			continue
+		fi
+		[ -n "$Cnt" ] || Cnt=NA
 		Task="$(realpath -s ${F::-11} |cut -c $CutFrom-)"
 		if [ "$Report" = "TXT" ]
 		then
 			[ $Row != 0 ] || echo -e "Count\tTime\tTask"
 			Tm=$(readable_time ${F::-11}/diff-previous)
 			echo -e "$Cnt\t$Tm\t$Task"
-		elif [ "$Report" = "JSON" ]
-		then
+		else
 			[ $Row -eq 0 ] || echo ","
 			Since=$(date -u -Iseconds -d @$(stat -c %Y ${F::-11}/diff-previous))
 			Diff=$(base64 -w 0 $(echo $F | sed -e 's/-count$/-current/') )
 			echo -e "\"$Task\": {\"since\":\"$Since\", \"count\":$Cnt, \"diff\":\"$Diff\"}"
-		else
-			helpme "ERR-103: unsupported report format"
 		fi
 		((Row+=1))
-	done
-	[ "$Report" != "JSON" ] || echo '}}'
+	done < <(find . -type f -name diff-count | sort)
+	if [ "$Report" = "TXT" ]
+	then
+		echo "OK: $Ok"
+	else
+		echo "}, \"OK\" : $Ok }"
+	fi
 	exit
 }
 
@@ -125,20 +139,26 @@ then
 fi
 CutFrom=$(echo $DaimonVar/ | wc -c)
 [ "$Report" = "NO" ] || report_then_quit $CutFrom
-for f in $(find $* -type d | sort)
+for f in $(find . -type d | sort)
 do
 	[ -f $f/lock ] || continue
 	[ -f $f/diff-count ] || continue
 	! diff -q $f/diff-count <(echo 0) > /dev/null || continue
-	[ -f $f/out-current -a -f $f/out-standard ] || continue
+	[ -f $f/out-current ] || continue
 	Admin=", [a]dd, or [o]verride"
-	[ -w $f/lock -a -w $f/out-standard ] || Admin=""
+	[ -w $f/lock ] || Admin=""
 	Task=$(realpath -s $f | cut -c $CutFrom-)
+	if [ -f $f/out-standard ]
+	then
+		Standard=$f/out-standard
+	else
+		Standard=/dev/null
+	fi
 	while :
 	do
 		clear
 		Tempfile=$(mktemp)
-		if ! Md5sum=$(flock -xn $f/lock bash -c "md5sum $f/out-current; diff --color=always $f/out-current $f/out-standard > $Tempfile; :")
+		if ! Md5sum=$(flock -xn $f/lock bash -c "md5sum $f/out-current; diff --color=always $f/out-current $Standard > $Tempfile; :")
 		then
 			read -n 1 -r -p "$Task: is locked by another process. Next[q] or any key to retry? " Ans
 			case "$Ans" in
