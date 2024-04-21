@@ -1,16 +1,19 @@
-# daimon, the simplest but powerful and flexible monitoring tool
+# Daimon, the simplest but powerful and flexible monitoring tool
 
-'daimon' runs a sub-command specified in crontab, compares its output with the standard file(s) under the TASK directory under var/, records the history, and sends out email alert if user specifed so in /etc/daimon.conf if the output is different.
+Tired of running commands every month, day, hour, or minute to check your system's health? Or are you debugging a random system failure, which is always the hardest? Daimon is for you. We have been using it to monitor the IT infrastructure at the Michigan Neuroscience Institute, University of Michigan, for decades.
 
-'dm-check' prints summary report or checks the abnormal tasks. User can choose to confirm the status is abnormal or a new normal.
+"Daimon" runs a sub-command specified in crontab, compares its output with the standard file(s) under the TASK directory in var/, records the difference, logs it with a timestamp, marks known critical alerts, and sends out email alerts if specified by the user in /etc/daimon.conf.
 
-'dm-linux' prints storage usage, CPU load percentage, internal temperature, drive SMART attributes, file changes, directory permissions, LSI raid and Areca raid. It also supports custom commands.
+"dm-check" prints a summary report or checks for abnormal tasks. Users can choose to confirm whether the status is abnormal or a new normal.
 
-'dm-ups' prints UPS status, it supports two APC UPS models. Feel free to add new models and send me a pull request.
+"dm-linux" prints storage usage, CPU load percentage, internal temperature, drive SMART attributes, file changes, directory permissions, LSI RAID, and Areca RAID. It also supports custom commands.
 
-'dm-ssh' is another parallel ssh based on GNU parallel.
+"dm-ups" prints UPS status; it supports two APC UPS models. Feel free to add new models and send me a pull request.
 
-We has been using daimon to monitor UPS status and hundreds of Linux machines for a decade. Recently we also use it to monitor LSI raid card in Windows machine.
+"dm-scp" copies a local file or directory to mutiple nodes in parallel.
+
+"dm-ssh" is a unique parallel SSH/SCP tool based on GNU parallel. It merges the output of all SSH commands as much as possible to save your precious eyes and fingers, as well as your useless mouse.
+
 
 ## Installation
 ```

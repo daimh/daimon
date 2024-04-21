@@ -115,10 +115,7 @@ fi
 	else
 		if [ $Rtn -eq 124 -o $Rtn -eq 125 -o $Rtn -eq 126 -o $Rtn -eq 127 -o $Rtn -eq 137 ]
 		then
-			echo "timeout returned $Rtn" >> $Dir/out-current
-		elif [ $Rtn -ne 0 ]
-		then
-			echo "sub-command returned $Rtn" >> $Dir/out-current
+			echo "Daimon: timeout returned $Rtn" >> $Dir/out-current
 		fi
 		set +f
 		for Standard in $(cd $Dir && ls out-standard.* 2>/dev/null) out-standard
