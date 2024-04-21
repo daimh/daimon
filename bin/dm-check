@@ -41,7 +41,7 @@ function report_then_quit {
 	CutFrom=$1
 	if [ "$Report" = "JSON" ]
 	then
-		echo '{ "version":"1.0", "alerts": {'
+		echo '{ "version":"1.1", "alerts": {'
 	elif [ "$Report" != "TXT" ]
 	then
 		helpme "ERR-103: unsupported report format"
@@ -58,16 +58,18 @@ function report_then_quit {
 		fi
 		[ -n "$Cnt" ] || Cnt=NA
 		Task="$(realpath -s ${F::-11} |cut -c $CutFrom-)"
+		Exit=$(cat ${F::-11}/out-exitcode)
+		[ -n "$Exit" ] || Exit=NA
 		if [ "$Report" = "TXT" ]
 		then
-			[ $Row != 0 ] || echo -e "Count\tTime\tTask"
+			[ $Row != 0 ] || echo -e "Count\tTime\tExit\tTask"
 			Tm=$(readable_time ${F::-11}/diff-previous)
-			echo -e "$Cnt\t$Tm\t$Task"
+			echo -e "$Cnt\t$Tm\t$Exit\t$Task"
 		else
 			[ $Row -eq 0 ] || echo ","
 			Since=$(date -u -Iseconds -d @$(stat -c %Y ${F::-11}/diff-previous))
 			Diff=$(base64 -w 0 $(echo $F | sed -e 's/-count$/-current/') )
-			echo -e "\"$Task\": {\"since\":\"$Since\", \"count\":$Cnt, \"diff\":\"$Diff\"}"
+			echo -e "\"$Task\": {\"since\":\"$Since\", \"count\":$Cnt, \"exit\":$Exit, \"diff\":\"$Diff\"}"
 		fi
 		((Row+=1))
 	done < <(find . -type f -name diff-count | sort)

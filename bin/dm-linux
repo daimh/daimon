@@ -6,9 +6,9 @@ import subprocess
 import time
 
 
-def err_exit(msg):
+def err_exit(msg, code=1):
 	print(f'\n{msg}')
-	exit(1)
+	exit(code)
 
 
 def get_args():
@@ -94,7 +94,7 @@ class Task():
 		return self.exitcode
 
 	def critical(self, ln):
-		self.exitcode = 255
+		self.exitcode = 222
 		return 'CRITICAL: ' + ln
 
 
@@ -136,7 +136,7 @@ class DfCheck(Task):
 			if used >= self.threshold:
 				self.lns.append('%s\t%s\t%s\tCRITICAL: %d%%\t%d%%\t%s' % (
 					fs[0], size, avail, used, self.threshold, fs[5]))
-				self.exitcode = 255
+				self.exitcode = 222
 			else:
 				self.lns.append('%s\t%s\tOK\tOK\tOK\t%s' % (fs[0], size, fs[5]))
 		except ValueError:
@@ -703,7 +703,7 @@ def main():
 		prefix, ln = fs[0], fs[1].rstrip()
 		if prefix.endswith(':summary'):
 			prfx = prefix[:-8]
-			if tasks[prfx].summary(prfx) == 255:
+			if tasks[prfx].summary(prfx) == 222:
 				critical = True
 		elif ':exit:' in prefix:
 			if not prefix.endswith(':exit:0'):
@@ -717,7 +717,7 @@ def main():
 	if failed > 0:
 		err_exit(f'ERR-116: {failed} command(s) failed!')
 	if critical:
-		err_exit(f'ERR-255: critical alert found')
+		err_exit(f'ERR-222: critical alert found', 222)
 	if p.returncode != 0:
 		err_exit(f'ERR-101: ssh failed with code {p.returncode}!')
 
