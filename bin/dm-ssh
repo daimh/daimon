@@ -104,7 +104,7 @@ do
 #HELPME_END
 	esac
 done
-which parallel &> /dev/null ||helpme "ERR-004: missing command 'parallel'"
+command -v parallel &> /dev/null ||helpme "ERR-004: missing command 'parallel'"
 [ $# -gt 1 ] ||helpme "ERR-002: use -h/--help"
 if [ "$Basename" = "dm-ssh" ]
 then
@@ -186,7 +186,7 @@ fi
 [ "$Quiet" = "Yes" ] ||echo -ne "\r1/$Total:\t$(head -n 1 $Job-nodes)"
 SshOpts='-o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p" -o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error -o StrictHostKeyChecking=no -o BatchMode=yes' 
 seq $Total |parallel -k -j $Parallel --colsep '\t' "
-	sleep \$(bc <<< \"scale=3; $Delay*\$RANDOM/32768\" )
+	sleep \$(printf \"0.%03d\n\" \$(($Delay * \$RANDOM * 1000 / 32768)) )
 	Node=\$(sed '{1}q;d' $Job-nodes)
 	if [ $Basename = dm-ssh ]
 	then
