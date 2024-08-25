@@ -36,23 +36,18 @@ def set_args_default(args):
 
 
 def add_class_to_parser(cls, parser):
+	args = [f'--{cls.__name__.lower()}']
 	if cls.option:
-		parser.add_argument(
-			f'-{cls.option}',
-			f'--{cls.__name__.lower()}',
-			help=cls.helpmsg,
-			metavar=cls.metavar,
-			action='append',
-			nargs='?'
-		)
+		args += [f'-{cls.option}']
+	kwargs = {'help': cls.helpmsg}
+	if cls.metavar:
+		kwargs['action'] = 'append'
+		kwargs['metavar'] = cls.metavar
+		kwargs['nargs'] = '?'
 	else:
-		parser.add_argument(
-			f'--{cls.__name__.lower()}',
-			help=cls.helpmsg,
-			metavar=cls.metavar,
-			action='append',
-			nargs='?'
-		)
+		kwargs['action'] = 'store_const'
+		kwargs['const'] = [True]
+	parser.add_argument(*args, **kwargs)
 	for subcls in cls.__subclasses__():
 		add_class_to_parser(subcls, parser)
 
@@ -627,7 +622,7 @@ class Lvs(Task):
 
 
 class Ceph(Task):
-	helpmsg = "check ceph filesystem health status with a threshold of" \
+	helpmsg = "check ceph filesystem health status with a threshold of " \
 		"usage percentage. Example: '--ceph 10P'"
 	metavar = 'THRESHOLD'
 
@@ -660,6 +655,26 @@ class Ceph(Task):
 			return ln
 		ln = self.re_since.sub('#', ln)
 		ln = self.re_age.sub('#', ln)
+		return ln
+
+
+class Zpool(Task):
+	helpmsg = "check zpool health status. Example: '--zpool'"
+	metavar = None
+
+	def __init__(self, param):
+		super().__init__()
+		self.cmds.append('zpool status')
+		self.re_state = re.compile('^ state: [0-9a-zA-Z]+')
+		self.re_errors = re.compile('^errors: .+')
+
+	def getln(self, ln):
+		if self.re_state.match(ln):
+			if not ln.endswith(' state: ONLINE'):
+				return self.critical(ln)
+		elif self.re_errors.match(ln):
+			if not ln.endswith('errors: No known data errors'):
+				return self.critical(ln)
 		return ln
 
 
