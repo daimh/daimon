@@ -420,7 +420,7 @@ class Storcli(Task):
 					'▼: Right/Left, ◄: Front/Back, ►: Back/Front'
 				)
 				if len(slot_sns) != 20:
-					print('{prefix}:\tno 20 drives')
+					print(f'{prefix}:\tno 20 drives')
 					continue
 				slot_sns = [sn[0] for sl, sn in sorted(slot_sns.items())]
 				for row in range(5):
