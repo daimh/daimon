@@ -326,8 +326,13 @@ class Sysinfo(Task):
 		elif ln.startswith('IPMISDR:\t'):
 			ln = ln[9:]
 			fs = ln.split('|', maxsplit=3)
-			if fs[2] == ' ok':
-				fs[1] = ' ok'.ljust(len(fs[1]))
+			detail = fs[1].strip()
+			if (
+				fs[2].strip() == 'ok' and
+				detail != 'no reading' and 
+				not detail.startswith('0x')
+			):
+				del fs[1]
 				ln = '|'.join(fs)
 		return ln
 
