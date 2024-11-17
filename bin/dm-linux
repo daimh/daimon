@@ -669,7 +669,7 @@ class Zpool(Task):
 
 	def __init__(self, param):
 		super().__init__()
-		self.cmds.append('zpool status')
+		self.cmds.append('ZPOOL_SCRIPTS_AS_ROOT=1 zpool status -c serial')
 		self.re_state = re.compile('^ state: [0-9a-zA-Z]+')
 		self.re_errors = re.compile('^errors: .+')
 
