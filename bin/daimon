@@ -36,7 +36,7 @@ do
 		-h | --help)	#print help information
 			helpme ;;
 		--version)	#print version
-			helpme 20221103 ;;
+			helpme 20241123 ;;
 		-v )	#verbose output
 			set -x
 			shift ;;
@@ -75,7 +75,8 @@ then
 	[ -n "$EmailTo" ] || helpme "ERR-102: -m needs an email address"
 fi
 Cmd="$@"
-[ -n "$DaimonVar" ] || helpme "ERR-103: missing environment variable DaimonVar in Configuration file $DaimonConf"
+[ -n "$DaimonVar" ] \
+	|| helpme "ERR-103: missing environment variable DaimonVar in Configuration file $DaimonConf"
 [ -d "$DaimonVar" ] || helpme "ERR-104: $DaimonVar is not a directory"
 [ -n "$Task" ] || helpme "ERR-105: Task is missing"
 Dir=$DaimonVar/$Task
@@ -111,9 +112,11 @@ fi
 		fi
 		mv $Dir/out-current $Dir/out-standard
 		cat $Dir/out-standard
-		[ "$EmailTo" = "NO" ] || cat $Dir/out-standard | mail -s "$Task is initalized successfully. If the command output is not right, let admins know it" $EmailTo
+		[ "$EmailTo" = "NO" ] || cat $Dir/out-standard \
+			| mail -s "$Task is initalized successfully. If the command output is not right, let admins know it" $EmailTo
 	else
-		if [ $Rtn -eq 124 -o $Rtn -eq 125 -o $Rtn -eq 126 -o $Rtn -eq 127 -o $Rtn -eq 137 ]
+		if [ $Rtn -eq 124 -o $Rtn -eq 125 -o $Rtn -eq 126 -o $Rtn -eq 127 \
+			-o $Rtn -eq 137 ]
 		then
 			echo "Daimon: timeout returned $Rtn" >> $Dir/out-current
 		fi
@@ -125,17 +128,18 @@ fi
 				break
 			fi
 		done
-		cd $Dir && mv $(ls -rS diff-out-standard* | head -n 1) diff-current && rm -f diff-out-standard* 2> /dev/null
+		cd $Dir && mv $(ls -rS diff-out-standard* | head -n 1) diff-current \
+			&& rm -f diff-out-standard*
 		set -f
 		if [ -f $Dir/diff-count ]
 		then
-			let FailedCntPrv=$(cat $Dir/diff-count) || :
+			FailedCntPrv=$(cat $Dir/diff-count) || FailedCntPrv=0
 		else
-			let FailedCntPrv=0 || :
+			FailedCntPrv=0
 		fi
 		if [ -s $Dir/diff-current ]
 		then
-			if [ $FailedCntPrv -gt 0 ] && diff -q $Dir/diff-current $Dir/diff-previous &> /dev/null
+			if diff -q $Dir/diff-current $Dir/diff-previous &> /dev/null
 			then
 				let FailedCountCur=$FailedCntPrv+1
 			else
@@ -152,12 +156,15 @@ fi
 				else
 					Subject="$Task is detected"
 				fi
-				[ "$EmailTo" = "NO" ] || cat $Dir/diff-current | strings -n 1 2>&1 | mail -s "$Subject" $EmailTo
+				[ "$EmailTo" = "NO" ] \
+					|| cat $Dir/diff-current | strings -n 1 2>&1 \
+						| mail -s "$Subject" $EmailTo
 			fi
 		else
 			if [ $FailedCntPrv -gt 0 ]
 			then
-				[ "$EmailTo" = "NO" ] || cat $Dir/out-current | strings -n 1 2>&1 | mail -s "$Task is back to normal" $EmailTo
+				[ "$EmailTo" = "NO" ] || cat $Dir/out-current \
+					| strings -n 1 2>&1 | mail -s "$Task is back to normal" $EmailTo
 				echo $FailedCntPrv > $Dir/history-$(date +%FT%T)-norm
 			fi
 			echo 0 > $Dir/diff-count

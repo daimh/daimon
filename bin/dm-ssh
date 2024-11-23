@@ -14,14 +14,14 @@ function helpme {
 
 function cleanme {
 	set +u
-	[ -z "$Job" ] ||rm -f $Job $Job-set $Job-exclude $Job-host-* $Job-nodes
+	[ -z "$Job" ] || rm -f $Job $Job-*
 	set -u
 }
 
 function message {
-	[ ! -t 1 ] ||tput setaf 1
+	[ ! -t 1 ] || tput setaf 1
 	echo $@
-	[ ! -t 1 ] ||tput sgr0
+	[ ! -t 1 ] || tput sgr0
 }
 
 DmsshConf=~/.dm-ssh.conf
@@ -38,7 +38,7 @@ OptShort="hvle:E:j:d:q"
 OptLong="help,version,list,exclude-hosts:,exclude-sets:,jobs:,delay:,quiet"
 Opts=$(getopt -o $OptShort --long $OptLong -n $Basename -- "$@")
 Job=$(mktemp /tmp/$Basename-XXXX )
-[ -n "$Job" ] ||helpme "ERR-007: failed to create temp file"
+[ -n "$Job" ] || helpme "ERR-007: failed to create temp file"
 Parallel=0
 echo -n > $Job-exclude
 eval set -- "$Opts"
@@ -53,7 +53,7 @@ do
 #	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
 #	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
 #EXAMPLE
-#	echo -e "set1:\tlocalhost\nset2:\tlocalhost,$HOSTNAME" |tee ~/.dm-ssh.conf #define two host sets
+#	echo -e "set1:\tlocalhost\nset2:\tlocalhost,$HOSTNAME" | tee ~/.dm-ssh.conf #define two host sets
 #	dm-ssh -h
 #	dm-ssh set1 hostname
 #	dm-ssh -e localhost root@set2 -- df -lh
@@ -64,7 +64,7 @@ do
 		-h |--help)	#print help information
 			helpme ;;
 		--version)	#print version
-			helpme 20240327 ;;
+			helpme 20241123 ;;
 		-v)	#verbose output
 			set -x
 			shift ;;
@@ -74,13 +74,13 @@ do
 			cleanme
 			exit ;;
 		-e |--exclude-hosts)	#exclude hosts. E.g. host-1,host-2
-			echo $2 |sed "s/,/\n/g" >> $Job-exclude
+			echo $2 | sed "s/,/\n/g" >> $Job-exclude
 			shift 2 ;;
 		-E |--exclude-sets)	#excluded host sets. E.g. set1,set2
-			echo $2 |sed "s/,/\n/g" |while read E
+			echo $2 | sed "s/,/\n/g" | while read E
 			do
-				grep -q ^$E: $DmsshConf ||helpme "ERR-006: exclude-set '$E' doesn't exist"
-				grep ^$E: $DmsshConf |cut -d '	' -f 2 |sed "s/,/\n/g" >> $Job-exclude
+				grep -q ^$E: $DmsshConf || helpme "ERR-006: exclude-set '$E' doesn't exist"
+				grep ^$E: $DmsshConf | cut -d '	' -f 2 | sed "s/,/\n/g" >> $Job-exclude
 			done
 			shift 2 ;;
 		-j |--jobs)	#number of parallel jobs, default 0 means as many as possible
@@ -104,30 +104,30 @@ do
 #HELPME_END
 	esac
 done
-command -v parallel &> /dev/null ||helpme "ERR-004: missing command 'parallel'"
-[ $# -gt 1 ] ||helpme "ERR-002: use -h/--help"
+command -v parallel &> /dev/null || helpme "ERR-004: missing command 'parallel'"
+[ $# -gt 1 ] || helpme "ERR-002: use -h/--help"
 if [ "$Basename" = "dm-ssh" ]
 then
-	Set=$1
+	Sets=$1
 	shift
 	Cmd="$@"
 	Dir=false
 elif [ "$Basename" = "dm-scp" ]
 then
 	Files=("$@")
-	Set=${Files[-1]}
+	Sets=${Files[-1]}
 	Cmd=false
 	unset 'Files[-1]'
 else
 	helpme "ERR-010: unsupported mode"
 fi
-Arr=(${Set//@/ })
+Arr=(${Sets//@/ })
 case "${#Arr[@]}" in
 	1)
 		SshUser=$USER ;;
 	2)
 		SshUser=${Arr[0]}
-		Set=${Arr[1]} ;;
+		Sets=${Arr[1]} ;;
 	0)
 		helpme "ERR-008: set name cannot be empty string";;
 	*)
@@ -135,8 +135,8 @@ case "${#Arr[@]}" in
 esac
 if [ "$Basename" = "dm-scp" ]
 then
-	Arr=(${Set//:/ })
-	Set=${Arr[0]}
+	Arr=(${Sets//:/ })
+	Sets=${Arr[0]}
 	case "${#Arr[@]}" in
 		1)
 			Dir="";;
@@ -146,19 +146,26 @@ then
 			helpme "ERR-011: dm-scp TARGET name can only have one :";;
 	esac
 fi
-rm -f $Job-set
-[ -z "$Set" ] ||grep ^$Set: $DmsshConf >> $Job-set ||
-	helpme "ERR-005: such set \"$Set\" doesn't exist"
-[ -s "$Job-set" ] ||helpme "ERR-003: parameter -s or -n is missing"
+Sets=(${Sets//,/ })
+rm -f $Job-sets
+for S in ${Sets[@]}
+do
+	grep ^$S: $DmsshConf >> $Job-sets ||
+		helpme "ERR-005: such set \"$S\" doesn't exist"
+done
+[ -s "$Job-sets" ] || helpme "ERR-003: missing Sets"
+cut -d '	' -f 2 $Job-sets | sed "s/,/\n/g" | sort -u > $Job-nodes
+sort -u $Job-exclude > $Job-temp
+mv $Job-temp $Job-exclude
 set +e
-if [ "$(join -v 2 <( (grep ^$Set: $DmsshConf |cut -d '	' -f 2 ) |sed "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude) |wc -l )" != "0" ]
+if [ "$(join -v 2 $Job-nodes $Job-exclude | wc -l )" != "0" ]
 then
-	join -v 2 <(grep ^$Set: $DmsshConf |cut -d '	' -f 2 |sed "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude)
-	read -n 1 -r -p "The hosts above are excluded, but they are not in the node set \"$Set\", you might want to fix your -e/E. continue? [y/N]" yn
+	join -v 2 $Job-nodes $Job-exclude
+	read -n 1 -r -p "The hosts above are excluded, but they are not in the specified sets, you might want to fix your -e/E. continue? [y/N]" yn
 	case "$yn" in
-		Y|y)
+		Y | y)
 			echo ;;
-		N|n)
+		N | n)
 			echo
 			cleanme
 			exit 1 ;;
@@ -166,9 +173,12 @@ then
 			helpme "Please answer y or n!";;
 	esac
 fi
-join -v 1 <( cut -d '	' -f 2 $Job-set |sed "s/,/\n/g" |sort -u ) <(sort -u $Job-exclude) > $Job-nodes
-MaxWidth=$(cat $Job-nodes |wc -L)
-[ "$MaxWidth" -gt 4 ] ||MaxWidth=4
+join -v 1 $Job-nodes $Job-exclude > $Job-temp
+mv $Job-temp $Job-nodes
+[ "$( cat $Job-nodes | wc -l )" != "0" ] \
+	|| helpme "ERR-012: no such nodes"
+MaxWidth=$(cat $Job-nodes | wc -L)
+[ "$MaxWidth" -gt 4 ] || MaxWidth=4
 ((MaxWidth+=4))
 if [ -t 1 ]
 then
@@ -178,14 +188,14 @@ else
 	TailWidth=80
 	Quiet=Yes
 fi
-Total=$(cat $Job-nodes |wc -l)
+Total=$(cat $Job-nodes | wc -l)
 if [ "$Quiet" != "Yes" ]
 then
 	message "####$Basename####"
 fi
-[ "$Quiet" = "Yes" ] ||echo -ne "\r1/$Total:\t$(head -n 1 $Job-nodes)"
+[ "$Quiet" = "Yes" ] || echo -ne "\r1/$Total:\t$(head -n 1 $Job-nodes)"
 SshOpts='-o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p" -o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error -o StrictHostKeyChecking=no -o BatchMode=yes' 
-seq $Total |parallel -k -j $Parallel --colsep '\t' "
+seq $Total | parallel -k -j $Parallel --colsep '\t' "
 	sleep \$(printf \"0.%03d\n\" \$(($Delay * \$RANDOM * 1000 / 32768)) )
 	Node=\$(sed '{1}q;d' $Job-nodes)
 	if [ $Basename = dm-ssh ]
@@ -201,26 +211,29 @@ seq $Total |parallel -k -j $Parallel --colsep '\t' "
 		if [ \$Next -le $Total ]
 		then
 			echo -ne \"\r\$Next/$Total:\t\"
-			head -n \$Next $Job-nodes |tr '\n' ',' |tail -c $TailWidth
+			head -n \$Next $Job-nodes | tr '\n' ',' | tail -c $TailWidth
 		else
 			echo -ne \"\r$Total/$Total:\t\"
-			cat $Job-nodes |tr '\n' ',' |sed 's/,$/    \n/'
+			cat $Job-nodes | tr '\n' ',' | sed 's/,$/    \n/'
 		fi
 	fi
 	[ -s $Job-host-\$Node ] &&
-		[ \"\$(tail -c 1 $Job-host-\$Node |od -iAn |tr -d ' ' )\" != \"10\" ] &&
+		[ \"\$(tail -c 1 $Job-host-\$Node | od -iAn | tr -d ' ' )\" != \"10\" ] &&
 		echo -e \"\n\" >> $Job-host-\$Node
 	echo \$Rtn >> $Job-host-\$Node
 "
-[ "$Quiet" = "Yes" ] ||message -e "####Output####"
+[ "$Quiet" = "Yes" ] || message -e "####Output####"
 set +f
 TailLines=1
 while read -r C L
 do
-	[ "$C" = "$Total" ] ||break
+	[ "$C" = "$Total" ] || break
 	((TailLines++))
 	echo "LINE:$L"
-done < <(for F in $Job-host-*; do head -n -1 $F |nl -ba -w1; done |sort -n |uniq -c |sed "s/^ \+//")
+done < <(for F in $Job-host-*
+	do
+		head -n -1 $F | nl -ba -w1
+	done | sort -n | uniq -c | sed "s/^ \+//")
 FailedHosts=()
 SucceededHosts=()
 for F in $Job-host-*
@@ -235,14 +248,14 @@ do
 	else
 		let Rtn=166
 	fi
-	Node="$(echo $F |sed 's/.*-host-//' )"
+	Node="$(echo $F | sed 's/.*-host-//' )"
 	if [ $Rtn = 0 ]
 	then
 		SucceededHosts+=( $Node )
 	else
 		FailedHosts+=( $Node )
 	fi
-	tail -n +$TailLines $F |head -n -1 |sed "s/^/$Rtn:$Node:\t/"
+	tail -n +$TailLines $F | head -n -1 | sed "s/^/$Rtn:$Node:\t/"
 done
 set -f
 cleanme
@@ -256,7 +269,7 @@ if [ ${#FailedHosts[@]} -gt 0 ]
 then
 	message "####Failed####"
 	echo -e "${#FailedHosts[@]}/$Total:\t${FailedHosts[*]}"
-	[ ! -t 1 ] ||tabs 8
+	[ ! -t 1 ] || tabs 8
 	exit 166
 fi
-[ ! -t 1 ] ||tabs 8
+[ ! -t 1 ] || tabs 8
