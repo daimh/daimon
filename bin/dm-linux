@@ -300,16 +300,16 @@ class Sysinfo(Task):
 			f'head -n 1 /proc/meminfo',
 			f'grep -H ^ /sys/devices/virtual/block/md*/md/degraded'
 			' /sys/devices/virtual/block/md*/md/sync_completed 2> /dev/null ||:',
-			f'[ ! -f /proc/drbd ] || drbdadm status',
-			f'grep -H "" /sys/class/net/*/speed 2> /dev/null ||:',
+			f'drbdadm status 2> /dev/null ||:',
 			f'ipmitool lan print | grep "^IP Address" ||:',
 			f'ipmitool sdr list |sed "s/^/IPMISDR:\t/" ||:',
 		]
 		if param is None:
 			self.cmds += [
-				f'[ ! -f /proc/net/bonding/bond0 ] || cat /proc/net/bonding/bond*',
-				f'ip -br a',
-				f'ip r',
+				f'grep -H ^ /sys/class/net/e*/speed 2> /dev/null ||:',
+				f'grep -H ^ /proc/net/bonding/bond* 2> /dev/null ||:',
+				f'ip -br a | grep -ve ^docker -e ^vir -e ^veth',
+				f'ip r | grep -ve docker',
 			]
 		elif param != 'netoff':
 			err_exit('ERR-107: wrong operand for --sysinfo')
