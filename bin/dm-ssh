@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -Eeufo pipefail
 trap "exit 1" TERM
-function helpme {
+function die {
 	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' \
-			| grep -v "^#HELPME_" | sed "s/#//" | tr -s '\t' 1>&2
+		grep '#' /proc/$$/fd/255 \
+			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
+			| grep -v "^#@ HELP_" \
+			| sed "s/#@//; s/ \+/ /; s/\t\+/\t/; s/^ //" 
 	fi
 	kill 0
 }
@@ -29,7 +31,7 @@ if [ ! -f $DmsshConf ]
 then
 	DmsshConf=/etc/dm-ssh.conf
 	[ -f $DmsshConf ] ||
-		helpme "ERR-001: missing config file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
+		die "ERR-001: missing config file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
 fi
 Basename=$(basename $0)
 Delay=0
@@ -38,58 +40,58 @@ OptShort="hvle:E:j:d:q"
 OptLong="help,version,list,exclude-hosts:,exclude-sets:,jobs:,delay:,quiet"
 Opts=$(getopt -o $OptShort --long $OptLong -n $Basename -- "$@")
 Job=$(mktemp /tmp/$Basename-XXXX )
-[ -n "$Job" ] || helpme "ERR-007: failed to create temp file"
+[ -n "$Job" ] || die "ERR-007: failed to create temp file"
 Parallel=0
 echo -n > $Job-exclude
 eval set -- "$Opts"
 while [ $# -gt 0 ]
 do
 	case "$1" in
-#HELPME_START
-#NAME
-#	dm-ssh, parallel ssh
-#	dm-scp, parallel scp
-#SYNOPSIS
-#	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
-#	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
-#EXAMPLE
-#	echo -e "set1:\tlocalhost\nset2:\tlocalhost,$HOSTNAME" | tee ~/.dm-ssh.conf #define two host sets
-#	dm-ssh -h
-#	dm-ssh set1 hostname
-#	dm-ssh -e localhost root@set2 -- df -lh
-#	touch testfile
-#	dm-scp testfile root@set2:/tmp
-#	dm-scp -e localhost -- testfile root@set2:/tmp
-#DESCRIPTION
-		-h |--help)	#print help information
-			helpme ;;
-		--version)	#print version
-			helpme 20241123 ;;
-		-v)	#verbose output
+#@ HELP_START
+#@ NAME
+#@ 	dm-ssh, parallel ssh
+#@ 	dm-scp, parallel scp
+#@ SYNOPSIS
+#@ 	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
+#@ 	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
+#@ EXAMPLE
+#@ 	echo -e "set1:\tlocalhost\nset2:\tlocalhost,$HOSTNAME" | tee ~/.dm-ssh.conf #define two host sets
+#@ 	dm-ssh -h
+#@ 	dm-ssh set1 hostname
+#@ 	dm-ssh -e localhost root@set2 -- df -lh
+#@ 	touch testfile
+#@ 	dm-scp testfile root@set2:/tmp
+#@ 	dm-scp -e localhost -- testfile root@set2:/tmp
+#@ DESCRIPTION
+		-h |--help)	#@ print help information
+			die ;;
+		--version)	#@ print version
+			die 20250212 ;;
+		-v)	#@ verbose output
 			set -x
 			shift ;;
-		-l |--list)	#list all sets and their hosts
+		-l |--list)	#@ list all sets and their hosts
 			cat $DmsshConf
 			message $DmsshConf
 			cleanme
 			exit ;;
-		-e |--exclude-hosts)	#exclude hosts. E.g. host-1,host-2
+		-e |--exclude-hosts)	#@ exclude hosts. E.g. host-1,host-2
 			echo $2 | sed "s/,/\n/g" >> $Job-exclude
 			shift 2 ;;
-		-E |--exclude-sets)	#excluded host sets. E.g. set1,set2
+		-E |--exclude-sets)	#@ excluded host sets. E.g. set1,set2
 			echo $2 | sed "s/,/\n/g" | while read E
 			do
-				grep -q ^$E: $DmsshConf || helpme "ERR-006: exclude-set '$E' doesn't exist"
+				grep -q ^$E: $DmsshConf || die "ERR-006: exclude-set '$E' doesn't exist"
 				grep ^$E: $DmsshConf | cut -d '	' -f 2 | sed "s/,/\n/g" >> $Job-exclude
 			done
 			shift 2 ;;
-		-j |--jobs)	#number of parallel jobs, default 0 means as many as possible
+		-j |--jobs)	#@ number of parallel jobs, default 0 means as many as possible
 			Parallel=$2
 			shift 2 ;;
-		-d |--delay)	#NUM, sleep a random fraction of NUM seconds before ssh-ing, default 0
+		-d |--delay)	#@ NUM, sleep a random fraction of NUM seconds before ssh-ing, default 0
 			((Delay=$2))
 			shift 2 ;;
-		-q |--quiet)	#quiet
+		-q |--quiet)	#@ quiet
 			Quiet=Yes
 			shift ;;
 		--)
@@ -97,15 +99,15 @@ do
 			break ;;
 		*)
 			break ;;
-#AUTHOR
-#	Manhong Dai, MNI, U of Michigan
-#COPYRIGHT
-#	Copyright © 2002-2023 University of Michigan. MIT License
-#HELPME_END
+#@ AUTHOR
+#@ 	Manhong Dai, MNI, U of Michigan
+#@ COPYRIGHT
+#@ 	Copyright © 2002-2023 University of Michigan. MIT License
+#@ HELP_END
 	esac
 done
-command -v parallel &> /dev/null || helpme "ERR-004: missing command 'parallel'"
-[ $# -gt 1 ] || helpme "ERR-002: use -h/--help"
+command -v parallel &> /dev/null || die "ERR-004: missing command 'parallel'"
+[ $# -gt 1 ] || die "ERR-002: use -h/--help"
 if [ "$Basename" = "dm-ssh" ]
 then
 	Sets=$1
@@ -119,7 +121,7 @@ then
 	Cmd=false
 	unset 'Files[-1]'
 else
-	helpme "ERR-010: unsupported mode"
+	die "ERR-010: unsupported mode"
 fi
 Arr=(${Sets//@/ })
 case "${#Arr[@]}" in
@@ -129,9 +131,9 @@ case "${#Arr[@]}" in
 		SshUser=${Arr[0]}
 		Sets=${Arr[1]} ;;
 	0)
-		helpme "ERR-008: set name cannot be empty string";;
+		die "ERR-008: set name cannot be empty string";;
 	*)
-		helpme "ERR-009: set name can have up to one @";;
+		die "ERR-009: set name can have up to one @";;
 esac
 if [ "$Basename" = "dm-scp" ]
 then
@@ -143,7 +145,7 @@ then
 		2)
 			Dir=${Arr[1]} ;;
 		*)
-			helpme "ERR-011: dm-scp TARGET name can only have one :";;
+			die "ERR-011: dm-scp TARGET name can only have one :";;
 	esac
 fi
 Sets=(${Sets//,/ })
@@ -151,9 +153,9 @@ rm -f $Job-sets
 for S in ${Sets[@]}
 do
 	grep ^$S: $DmsshConf >> $Job-sets ||
-		helpme "ERR-005: such set \"$S\" doesn't exist"
+		die "ERR-005: such set \"$S\" doesn't exist"
 done
-[ -s "$Job-sets" ] || helpme "ERR-003: missing Sets"
+[ -s "$Job-sets" ] || die "ERR-003: missing Sets"
 cut -d '	' -f 2 $Job-sets | sed "s/,/\n/g" | sort -u > $Job-nodes
 sort -u $Job-exclude > $Job-temp
 mv $Job-temp $Job-exclude
@@ -170,13 +172,13 @@ then
 			cleanme
 			exit 1 ;;
 		*)
-			helpme "Please answer y or n!";;
+			die "Please answer y or n!";;
 	esac
 fi
 join -v 1 $Job-nodes $Job-exclude > $Job-temp
 mv $Job-temp $Job-nodes
 [ "$( cat $Job-nodes | wc -l )" != "0" ] \
-	|| helpme "ERR-012: no such nodes"
+	|| die "ERR-012: no such nodes"
 MaxWidth=$(cat $Job-nodes | wc -L)
 [ "$MaxWidth" -gt 4 ] || MaxWidth=4
 ((MaxWidth+=4))
