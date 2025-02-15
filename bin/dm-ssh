@@ -26,6 +26,39 @@ function message {
 	[ ! -t 1 ] || tput sgr0
 }
 
+Stack=()
+function get_set_list {
+	local SetName=$1
+	[[ ! " ${Stack[@]} " =~ " $SetName " ]] \
+		|| die "ERR-015: sets are defined in a loop"
+	Stack+=($SetName)
+	declare -n List=$2
+	List="${SetMap[$SetName]}"
+	local -a Expanded
+	if [[ "$List" =~ @ ]] 
+	then
+		for Word in ${List//,/ }
+		do
+			if [[ $Word =~ @ ]]
+			then
+				Word="${Word:1}"
+				[[ ! $Word =~ @ ]] \
+					|| die "ERR-014: @ should be at the first character"
+				get_set_list $Word Sublist
+				Expanded+=($Sublist)
+			else
+				Expanded+=($Word)
+			fi
+		done
+		List=$(echo "${Expanded[@]}" \
+			| sed "s/[ ,]/\n/g" \
+			| sort -u | xargs \
+			| tr " " "," )
+		SetMap[$SetName]=$List
+	fi
+	unset Stack[-1]
+}
+
 DmsshConf=~/.dm-ssh.conf
 if [ ! -f $DmsshConf ]
 then
@@ -33,6 +66,20 @@ then
 	[ -f $DmsshConf ] ||
 		die "ERR-001: missing config file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
 fi
+declare -A SetMap 
+declare -a ALL
+while read SetName Nodes
+do
+	[[ "$SetName" = *: ]] \
+		|| die "ERR-013: missing : in $DmsshConf"
+	[ "$SetName" != ALL ] \
+		|| die "ERR-014: 'ALL' is reserved keyword in $DmsshConf"
+	SetName=${SetName::-1}
+	SetMap[$SetName]=$Nodes
+	ALL+=(@$SetName)
+done < $DmsshConf
+SetMap[ALL]=${ALL[@]}
+
 Basename=$(basename $0)
 Delay=0
 Quiet=No
@@ -55,7 +102,7 @@ do
 #@ 	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
 #@ 	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
 #@ EXAMPLE
-#@ 	echo -e "set1:\tlocalhost\nset2:\tlocalhost,$HOSTNAME" | tee ~/.dm-ssh.conf #define two host sets
+#@ 	echo -e "set1:\tlocalhost\nset2:\t@set1,$HOSTNAME" | tee ~/.dm-ssh.conf #define two host sets
 #@ 	dm-ssh -h
 #@ 	dm-ssh set1 hostname
 #@ 	dm-ssh -e localhost root@set2 -- df -lh
@@ -106,6 +153,8 @@ do
 #@ HELP_END
 	esac
 done
+
+
 command -v parallel &> /dev/null || die "ERR-004: missing command 'parallel'"
 [ $# -gt 1 ] || die "ERR-002: use -h/--help"
 if [ "$Basename" = "dm-ssh" ]
@@ -150,13 +199,14 @@ then
 fi
 Sets=(${Sets//,/ })
 rm -f $Job-sets
-for S in ${Sets[@]}
+for SetName in ${Sets[@]}
 do
-	grep ^$S: $DmsshConf >> $Job-sets ||
-		die "ERR-005: such set \"$S\" doesn't exist"
+	get_set_list $SetName SetNodes
+	echo "$SetNodes" >> $Job-sets ||
+		die "ERR-005: such set \"$SetName\" doesn't exist"
 done
 [ -s "$Job-sets" ] || die "ERR-003: missing Sets"
-cut -d '	' -f 2 $Job-sets | sed "s/,/\n/g" | sort -u > $Job-nodes
+sed "s/,/\n/g" < $Job-sets | sort -u > $Job-nodes
 sort -u $Job-exclude > $Job-temp
 mv $Job-temp $Job-exclude
 set +e
