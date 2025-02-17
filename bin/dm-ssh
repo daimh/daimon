@@ -31,6 +31,8 @@ function get_set_list {
 	local SetName=$1
 	[[ ! " ${Stack[@]} " =~ " $SetName " ]] \
 		|| die "ERR-015: sets are defined in a loop"
+	[[ -v SetMap[$SetName] ]] \
+		|| die "ERR-016: no such set \"$SetName\""
 	Stack+=($SetName)
 	declare -n List=$2
 	List="${SetMap[$SetName]}"
