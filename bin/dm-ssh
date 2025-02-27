@@ -20,12 +20,6 @@ function cleanme {
 	set -u
 }
 
-function message {
-	[ ! -t 1 ] || tput setaf 1
-	echo $@
-	[ ! -t 1 ] || tput sgr0
-}
-
 Stack=()
 function get_set_list {
 	local SetName=$1
@@ -82,6 +76,17 @@ do
 done < $DmsshConf
 SetMap[ALL]=${ALL[@]}
 
+if [ -t 1 ]
+then
+	Red="$(tput setaf 1)"
+	Grn="$(tput setaf 2)"
+	Off="$(tput sgr0)"
+else
+	Red=""
+	Grn=""
+	Off=""
+fi
+
 Basename=$(basename $0)
 Delay=0
 Quiet=No
@@ -115,13 +120,13 @@ do
 		-h |--help)	#@ print help information
 			die ;;
 		--version)	#@ print version
-			die 20250212 ;;
+			die 20250225 ;;
 		-v)	#@ verbose output
 			set -x
 			shift ;;
 		-l |--list)	#@ list all sets and their hosts
 			cat $DmsshConf
-			message $DmsshConf
+			echo "$Grn$DmsshConf$Off"
 			cleanme
 			exit ;;
 		-e |--exclude-hosts)	#@ exclude hosts. E.g. host-1,host-2
@@ -243,11 +248,8 @@ else
 	Quiet=Yes
 fi
 Total=$(cat $Job-nodes | wc -l)
-if [ "$Quiet" != "Yes" ]
-then
-	message "####$Basename####"
-fi
-[ "$Quiet" = "Yes" ] || echo -ne "\r1/$Total:\t$(head -n 1 $Job-nodes)"
+[ "$Quiet" = "Yes" ] \
+	|| echo -ne "${Grn}Running:$Off\n1/$Total:\t$(head -n 1 $Job-nodes)"
 SshOpts='-o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p" -o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error -o StrictHostKeyChecking=no -o BatchMode=yes' 
 seq $Total | parallel -k -j $Parallel --colsep '\t' "
 	sleep \$(printf \"0.%03d\n\" \$(($Delay * \$RANDOM * 1000 / 32768)) )
@@ -276,7 +278,7 @@ seq $Total | parallel -k -j $Parallel --colsep '\t' "
 		echo -e \"\n\" >> $Job-host-\$Node
 	echo \$Rtn >> $Job-host-\$Node
 "
-[ "$Quiet" = "Yes" ] || message -e "####Output####"
+[ "$Quiet" = "Yes" ] || echo "${Grn}Output:$Off"
 set +f
 TailLines=1
 while read -r C L
@@ -316,12 +318,12 @@ cleanme
 IFS=,
 if [ "$Quiet" != "Yes" -a ${#SucceededHosts[@]} -gt 0 ]
 then
-	message "####Succeeded####"
+	echo "${Grn}OK:$Off"
 	echo -e "${#SucceededHosts[@]}/$Total:\t${SucceededHosts[*]}"
 fi
 if [ ${#FailedHosts[@]} -gt 0 ]
 then
-	message "####Failed####"
+	echo "${Red}Error:$Off"
 	echo -e "${#FailedHosts[@]}/$Total:\t${FailedHosts[*]}"
 	[ ! -t 1 ] || tabs 8
 	exit 166
