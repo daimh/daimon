@@ -31,27 +31,48 @@ function get_set_list {
 	declare -n List=$2
 	List="${SetMap[$SetName]}"
 	local -a Expanded
-	if [[ "$List" =~ @ ]] 
-	then
-		for Word in ${List//,/ }
-		do
-			if [[ $Word =~ @ ]]
-			then
-				Word="${Word:1}"
-				[[ ! $Word =~ @ ]] \
-					|| die "ERR-014: @ should be at the first character"
-				get_set_list $Word Sublist
-				Expanded+=($Sublist)
-			else
-				Expanded+=($Word)
-			fi
-		done
-		List=$(echo "${Expanded[@]}" \
-			| sed "s/[ ,]/\n/g" \
-			| sort -u | xargs \
-			| tr " " "," )
-		SetMap[$SetName]=$List
-	fi
+	for Word in ${List// / }
+	do
+		if [[ $Word =~ ^@[[:alpha:]][-[:alnum:]]*$ ]]
+		then
+			Word="${Word:1}"
+			get_set_list $Word Sublist
+			Expanded+=($Sublist)
+		elif [[ $Word =~ ^([[:alnum:]][-.[:alnum:]]*)\[([[0-9]+[-,[0-9]+]*)\]([-.[:alnum:]]*)$ ]]
+		then
+			Prefix=${BASH_REMATCH[1]}
+			Suffix=${BASH_REMATCH[3]}
+			for Comma in ${BASH_REMATCH[2]//,/ } 
+			do
+				if [[ $Comma =~ ^([0-9]+)-([0-9]+)$ ]]
+				then
+					From=${BASH_REMATCH[1]}
+					To=${BASH_REMATCH[2]}
+					Width=${#To}
+					while read I
+					do
+						Expanded+=($Prefix$I$Suffix)
+					done < <( [ ${#From} -eq ${#To} ] \
+						&& seq -w $From $To \
+						|| seq $From $To ) 
+				elif [[ $Comma =~ ^([0-9]+)$ ]]
+				then
+					Expanded+=($Prefix$Comma$Suffix)
+				else
+					die "ERR-017: \"$Comma\" is ia a wrong definition between comma"
+				fi
+			done
+		elif [[ $Word =~ ^[[:alnum:]][-.[:alnum:]]*$ ]]
+		then
+			Expanded+=($Word)
+		else
+			die "ERR-014: \"$Word\" is a wrong node definition"
+		fi
+	done
+	List=$(echo "${Expanded[@]}" \
+		| sed "s/ /\n/g" \
+		| sort -u | xargs )
+	SetMap[$SetName]=$List
 	unset Stack[-1]
 }
 
@@ -109,18 +130,21 @@ do
 #@ 	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
 #@ 	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
 #@ EXAMPLE
-#@ 	echo -e "set1:\tlocalhost\nset2:\t@set1,$HOSTNAME" | tee ~/.dm-ssh.conf #define two host sets
-#@ 	dm-ssh -h
+#@	# define two sets of hosts
+#@ 	echo -e "set1:\tlocalhost\nset2:\t@set1 127.0.0.[2-10]" | tee ~/.dm-ssh.conf
+#@
 #@ 	dm-ssh set1 hostname
 #@ 	dm-ssh -e localhost root@set2 -- df -lh
-#@ 	touch testfile
-#@ 	dm-scp testfile root@set2:/tmp
-#@ 	dm-scp -e localhost -- testfile root@set2:/tmp
+#@
+#@	mkdir testdir
+#@ 	touch testdir/testfile
+#@ 	dm-scp testdir root@set2:/tmp
+#@ 	dm-scp -e localhost testdir root@set2:/tmp
 #@ DESCRIPTION
 		-h |--help)	#@ print help information
 			die ;;
 		--version)	#@ print version
-			die 20250225 ;;
+			die 20250320 ;;
 		-v)	#@ verbose output
 			set -x
 			shift ;;
@@ -213,7 +237,7 @@ do
 		die "ERR-005: such set \"$SetName\" doesn't exist"
 done
 [ -s "$Job-sets" ] || die "ERR-003: missing Sets"
-sed "s/,/\n/g" < $Job-sets | sort -u > $Job-nodes
+sed "s/ /\n/g" < $Job-sets | sort -u > $Job-nodes
 sort -u $Job-exclude > $Job-temp
 mv $Job-temp $Job-exclude
 set +e
@@ -267,10 +291,10 @@ seq $Total | parallel -k -j $Parallel --colsep '\t' "
 		if [ \$Next -le $Total ]
 		then
 			echo -ne \"\r\$Next/$Total:\t\"
-			head -n \$Next $Job-nodes | tr '\n' ',' | tail -c $TailWidth
+			head -n \$Next $Job-nodes | tr '\n' ' ' | tail -c $TailWidth
 		else
 			echo -ne \"\r$Total/$Total:\t\"
-			cat $Job-nodes | tr '\n' ',' | sed 's/,$/    \n/'
+			cat $Job-nodes | tr '\n' ' ' | sed 's/ $/    \n/'
 		fi
 	fi
 	[ -s $Job-host-\$Node ] &&
@@ -315,7 +339,6 @@ do
 done
 set -f
 cleanme
-IFS=,
 if [ "$Quiet" != "Yes" -a ${#SucceededHosts[@]} -gt 0 ]
 then
 	echo "${Grn}OK:$Off"
