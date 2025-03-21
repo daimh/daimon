@@ -136,10 +136,10 @@ do
 #@ 	dm-ssh set1 hostname
 #@ 	dm-ssh -e localhost root@set2 -- df -lh
 #@
-#@	mkdir testdir
-#@ 	touch testdir/testfile
-#@ 	dm-scp testdir root@set2:/tmp
-#@ 	dm-scp -e localhost testdir root@set2:/tmp
+#@	mkdir testout testin
+#@ 	date > testout/file
+#@ 	dm-scp testout set2:/tmp
+#@ 	dm-scp set2:/tmp/testout/file testin
 #@ DESCRIPTION
 		-h |--help)	#@ print help information
 			die ;;
@@ -196,10 +196,23 @@ then
 	Dir=false
 elif [ "$Basename" = "dm-scp" ]
 then
-	Files=("$@")
-	Sets=${Files[-1]}
-	Cmd=false
-	unset 'Files[-1]'
+	if [[ $1 =~ ^([[:alnum:]]*@?[-[:alnum:]]*):(.+) ]]
+	then
+		Cmd=scpin
+		Sets=${BASH_REMATCH[1]}
+		Files=("${BASH_REMATCH[2]}")
+		Dir=$2
+		[ -d $Dir ] || die "ERR-018: no such a directory \"$Dir\""
+	elif [[ ${@: -1} =~ ^([[:alnum:]]*@?[-[:alnum:]]+):(.*) ]]
+	then
+		Cmd=scpout
+		Sets=${BASH_REMATCH[1]}
+		Files=("$@")
+		Dir="${BASH_REMATCH[2]}"
+		unset 'Files[-1]'
+	else
+		die "ERR-019: wrong susage for dm-scp"
+	fi
 else
 	die "ERR-010: unsupported mode"
 fi
@@ -215,19 +228,19 @@ case "${#Arr[@]}" in
 	*)
 		die "ERR-009: set name can have up to one @";;
 esac
-if [ "$Basename" = "dm-scp" ]
-then
-	Arr=(${Sets//:/ })
-	Sets=${Arr[0]}
-	case "${#Arr[@]}" in
-		1)
-			Dir="";;
-		2)
-			Dir=${Arr[1]} ;;
-		*)
-			die "ERR-011: dm-scp TARGET name can only have one :";;
-	esac
-fi
+#if [ "$Basename" = "dm-scp" ]
+#then
+#	Arr=(${Sets//:/ })
+#	Sets=${Arr[0]}
+#	case "${#Arr[@]}" in
+#		1)
+#			Dir="";;
+#		2)
+#			Dir=${Arr[1]} ;;
+#		*)
+#			die "ERR-011: dm-scp TARGET name can only have one :";;
+#	esac
+#fi
 Sets=(${Sets//,/ })
 rm -f $Job-sets
 for SetName in ${Sets[@]}
@@ -281,8 +294,12 @@ seq $Total | parallel -k -j $Parallel --colsep '\t' "
 	if [ $Basename = dm-ssh ]
 	then
 		ssh $SshOpts $SshUser@\$Node <<< \"$Cmd\" &> $Job-host-\$Node
-	else
+	elif [ $Cmd = scpout ]
+	then
 		scp -qpr $SshOpts ${Files[@]} $SshUser@\$Node:$Dir &> $Job-host-\$Node
+	else
+		mkdir -p $Dir/\$Node
+		scp -qpr $SshOpts $SshUser@\$Node:${Files[@]} $Dir/\$Node &> $Job-host-\$Node
 	fi
 	Rtn=\$?
 	Next=\$(({1}+1))

@@ -1,19 +1,13 @@
 # Daimon, the simplest but powerful and flexible monitoring tool
 
-Tired of running commands every month, day, hour, or minute to check your system's health? Or are you debugging a random system failure, which is always the hardest? Daimon is for you. We have been using it to monitor the IT infrastructure at the Michigan Neuroscience Institute, University of Michigan, for decades.
+Tired of running commands every day, hour, or minute to check your system's health? Or are you struggling to debug a random system failure, which is always the hardest task? Daimon is here to help. We’ve been using it to monitor the IT infrastructure at the Michigan Neuroscience Institute, University of Michigan, for decades.
 
-"Daimon" runs a sub-command specified in crontab, compares its output with the standard file(s) under the TASK directory in var/, records the difference, logs it with a timestamp, marks known critical alerts, and sends out email alerts if specified by the user in /etc/daimon.conf.
+Daimon runs a sub-command specified in crontab, compares its output with standard files located in the TASK directory under `var/`, records the differences, logs them with a timestamp, identifies known critical alerts, and sends email notifications if specified by the user in `/etc/daimon.conf`.
 
-"dm-check" prints a summary report or checks for abnormal tasks. Users can choose to confirm whether the status is abnormal or a new normal.
-
-"dm-linux" prints storage usage, CPU load percentage, internal temperature, drive SMART attributes, file changes, directory permissions, LSI RAID, and Areca RAID. It also supports custom commands.
-
-"dm-ups" prints UPS status; it supports two APC UPS models. Feel free to add new models and send me a pull request.
-
-"dm-scp" copies a local file or directory to mutiple nodes in parallel.
-
-"dm-ssh" is a unique parallel SSH/SCP tool based on GNU parallel. It merges the output of all SSH commands as much as possible to save your precious eyes and fingers, as well as your useless mouse.
-
+- **dm-check**: Prints a summary report or checks for abnormal tasks. Users can confirm whether the status is abnormal or a new normal.
+- **dm-linux**: Displays storage usage, CPU load, internal temperature, drive SMART attributes, file changes, directory permissions, LSI RAID, and Areca RAID stats. It also supports custom commands.
+- **dm-scp**: Copies a local file or directory to mutiple nodes in parallel, or vice versa.
+- **dm-ssh**: A unique parallel SSH tool based on GNU Parallel. It combines the output of all SSH commands to save your eyes, fingers, and time.
 
 ## Installation
 ```
