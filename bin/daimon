@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 set -eEufo pipefail
 trap "exit 1" TERM
-function helpme {
+function die {
 	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' \
-			| grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2
+		grep '#' /proc/$$/fd/255 \
+			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
+			| grep -v "^#@ HELP_" \
+			| sed "s/#@//; s/ \+/ /; s/\t\+/\t/; s/^ //"
 	fi
 	kill 0
 }
 
 DaimonConf=/etc/daimon.conf
-. $DaimonConf || helpme "ERR-100: Configuration file $DaimonConf is missing"
+[ -f $DaimonConf ] || DaimonConf=~/.daimon.conf
+[ -f $DaimonConf ] || die "ERR-100: configuration file $DaimonConf is missing"
+. $DaimonConf || die "ERR-108: failed to load Configuration file $DaimonConf"
 Args="$*"
 EmailTo=""
 Task=""
@@ -27,30 +31,30 @@ eval set -- "$Opts"
 while [ $# -gt 0 ]
 do
 	case "$1" in
-#HELPME_START
-#SYNOPSIS
-#	daimon [OPTION]... -- CMD
-#EXAMPLE
-#	daimon -t linux/host-a -- dm-linux host-a -d 50
-#DESCRIPTION
+#@ HELP_START
+#@ SYNOPSIS
+#@	daimon [OPTION]... -- CMD
+#@ EXAMPLE
+#@	daimon -t linux/host-a -- dm-linux host-a -d 50
+#@ DESCRIPTION
 		-h | --help)	#print help information
-			helpme ;;
+			die ;;
 		--version)	#print version
-			helpme 20241123 ;;
+			die 20241123 ;;
 		-v )	#verbose output
 			set -x
 			shift ;;
 		-t | --task)	#NAME of a sub-directory under $DaimonVar
 			Task=$2
 			shift 2 ;;
-		-m | --mail)	#EMAIL addresses the alerts will be sent to, seperated by comma, default $USER, "NO" disables it
+		-m | --mail)	#EMAIL addresses the alerts will be sent to, seperated by comma, default $LOGNAME, "NO" disables it
 			EmailTo=$(echo $2 | sed -e "s/,/ /g")
 			shift 2 ;;
 		-n | --count)	#up to COUNT alerts will be sent for a new incident, default 1
-			let Count=$2 || helpme "ERR-101: -n needs a positive number"
+			let Count=$2 || die "ERR-101: -n needs a positive number"
 			shift 2 ;;
 		-s | --seconds)	#TIMEOUT of the command in seconds, default 60
-			let Timeout=$2 || helpme "ERR-107: -s needs a positive number"
+			let Timeout=$2 || die "ERR-107: -s needs a positive number"
 			shift 2 ;;
 		-w | --withhold)	#withhold printing daimon arguments
 			Withhold=YES
@@ -59,26 +63,29 @@ do
 			shift 1 ;;
 		*)
 			break ;;
-#AUTHOR
-#	Manhong Dai, MNI, U of Michigan
-#COPYRIGHT
-#	Copyright © 2002-2023 University of Michigan. MIT License
-#HELPME_END
+#@ AUTHOR
+#@ 	Manhong Dai, MNI, U of Michigan
+#@ COPYRIGHT
+#@ 	Copyright © 2002-2023 University of Michigan. MIT License
+#@ HELP_END
 	esac
 done
+
 if [ "$DaimonEmail" != "NO" ]
 then
 	set +u
 	[ -n "$EmailTo" ] || EmailTo=$MAILTO
+	[ -n "$EmailTo" ] || EmailTo=$LOGNAME
 	[ -n "$EmailTo" ] || EmailTo=$USER
-	set -u
-	[ -n "$EmailTo" ] || helpme "ERR-102: -m needs an email address"
+	[ -n "$EmailTo" ] || EmailTo=$USERNAME
+	set +u
+	[ -n "$EmailTo" ] || die "ERR-102: DaimonEmail is YES in $DaimonConf, but who should this alert be emailed to?"
 fi
 Cmd="$@"
 [ -n "$DaimonVar" ] \
-	|| helpme "ERR-103: missing environment variable DaimonVar in Configuration file $DaimonConf"
-[ -d "$DaimonVar" ] || helpme "ERR-104: $DaimonVar is not a directory"
-[ -n "$Task" ] || helpme "ERR-105: Task is missing"
+	|| die "ERR-103: missing DaimonVar in Configuration file $DaimonConf"
+[ -d "$DaimonVar" ] || die "ERR-104: $DaimonVar is not a directory"
+[ -n "$Task" ] || die "ERR-105: Task is missing"
 Dir=$DaimonVar/$Task
 [ -t 1 ] || sleep $[ $RANDOM%10 ]
 mkdir -p $Dir
@@ -94,12 +101,11 @@ fi
 	then
 		Msg="$Task ERR-001: flock failed"
 		[ "$EmailTo" = "NO" ] || echo | mail -s "$Msg" $EmailTo
-		helpme "$Msg"
+		die "$Msg"
 	fi
-	set +e
-	timeout $Timeout bash -c "$Cmd" >> $Dir/out-current 2>> $Dir/out-current
-	let Rtn=$?
-	set -e
+	Rtn=0
+	timeout $Timeout bash -c "$Cmd" >> $Dir/out-current 2>> $Dir/out-current \
+		|| Rtn=$?
 	echo "$Rtn" > $Dir/out-exitcode
 	if [ ! -f $Dir/out-standard ]
 	then
@@ -108,12 +114,13 @@ fi
 		then
 			cat $Dir/out-current
 			echo 99999 > $Dir/diff-count
-			helpme "ERR-106: Initialization failed for $Task"
+			die "ERR-106: initialization failed for $Task"
 		fi
 		mv $Dir/out-current $Dir/out-standard
 		cat $Dir/out-standard
 		[ "$EmailTo" = "NO" ] || cat $Dir/out-standard \
-			| mail -s "$Task is initalized successfully. If the command output is not right, let admins know it" $EmailTo
+			| mail -s "$Task is initalized successfully. If the command \
+				output is not right, let admins know it" $EmailTo
 	else
 		if [ $Rtn -eq 124 -o $Rtn -eq 125 -o $Rtn -eq 126 -o $Rtn -eq 127 \
 			-o $Rtn -eq 137 ]
@@ -123,7 +130,8 @@ fi
 		set +f
 		for Standard in $(cd $Dir && ls out-standard.* 2>/dev/null) out-standard
 		do
-			if diff $Dir/out-current $Dir/$Standard > $Dir/diff-$Standard 2> /dev/null
+			if diff $Dir/out-current $Dir/$Standard \
+				> $Dir/diff-$Standard 2> /dev/null
 			then
 				break
 			fi
@@ -164,7 +172,8 @@ fi
 			if [ $FailedCntPrv -gt 0 ]
 			then
 				[ "$EmailTo" = "NO" ] || cat $Dir/out-current \
-					| strings -n 1 2>&1 | mail -s "$Task is back to normal" $EmailTo
+					| strings -n 1 2>&1 \
+					| mail -s "$Task is back to normal" $EmailTo
 				echo $FailedCntPrv > $Dir/history-$(date +%FT%T)-norm
 			fi
 			echo 0 > $Dir/diff-count
