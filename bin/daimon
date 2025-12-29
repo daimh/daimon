@@ -2,16 +2,30 @@
 set -eEufo pipefail
 trap "exit 1" TERM
 function die {
+	# 20251225
 	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 \
+		grep '#@' /proc/$$/fd/255 \
 			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
 			| grep -v "^#@ HELP_" \
-			| sed "s/#@//; s/ \+/ /; s/\t\+/\t/; s/^ //"
+			| sed "
+				s/^#@//;
+				s/) #@ =/=/;
+				s/) #@ /\n\t\t/;
+				s/\t#@ /\t/;
+				s/ \+/ /;
+				s/^\t\t/\t/;
+				s/^ //" \
+			| sed "
+				s/\t/    /g;
+				s/ | /, /"
 	fi
-	kill 0
+	Pgid=$(ps -o pgid= $$ | tr -d " ")
+	[ $(cat /proc/$Pgid/task/$Pgid/children | wc -w) -lt 2 ] \
+		&& exit 1 \
+		|| kill 0
 }
 
 DaimonConf=/etc/daimon.conf
@@ -79,8 +93,13 @@ then
 	[ -n "$EmailTo" ] || EmailTo=$USER
 	[ -n "$EmailTo" ] || EmailTo=$USERNAME
 	set +u
-	[ -n "$EmailTo" ] || die "ERR-102: DaimonEmail is YES in $DaimonConf, but who should this alert be emailed to?"
+	[ -n "$EmailTo" ] || (
+		Msg="ERR-102: DaimonEmail is YES in $DaimonConf, "
+		Msg+="but who should this alert be emailed to?"
+		die "$Msg"
+	)
 fi
+
 Cmd="$@"
 [ -n "$DaimonVar" ] \
 	|| die "ERR-103: missing DaimonVar in Configuration file $DaimonConf"
@@ -100,7 +119,7 @@ fi
 	if ! flock -xn 99
 	then
 		Msg="$Task ERR-001: flock failed"
-		[ "$EmailTo" = "NO" ] || echo | mail -s "$Msg" $EmailTo
+		[ -z "$EmailTo" ] || echo | mail -s "$Msg" $EmailTo
 		die "$Msg"
 	fi
 	Rtn=0
@@ -118,7 +137,7 @@ fi
 		fi
 		mv $Dir/out-current $Dir/out-standard
 		cat $Dir/out-standard
-		[ "$EmailTo" = "NO" ] || cat $Dir/out-standard \
+		[ -z "$EmailTo" ] || cat $Dir/out-standard \
 			| mail -s "$Task is initalized successfully. If the command \
 				output is not right, let admins know it" $EmailTo
 	else
@@ -164,14 +183,15 @@ fi
 				else
 					Subject="$Task is detected"
 				fi
-				[ "$EmailTo" = "NO" ] \
+				[ -z "$EmailTo" ] \
 					|| cat $Dir/diff-current | strings -n 1 2>&1 \
 						| mail -s "$Subject" $EmailTo
 			fi
 		else
 			if [ $FailedCntPrv -gt 0 ]
 			then
-				[ "$EmailTo" = "NO" ] || cat $Dir/out-current \
+				[ -z "$EmailTo" ] \
+					|| cat $Dir/out-current \
 					| strings -n 1 2>&1 \
 					| mail -s "$Task is back to normal" $EmailTo
 				echo $FailedCntPrv > $Dir/history-$(date +%FT%T)-norm
