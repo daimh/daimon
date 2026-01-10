@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 trap "exit 1" TERM
-function helpme {
+function die {
+	# 20251225
 	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 | sed -n '/^#HELPME_START/,/^#HELPME_END/p' \
-			| grep -v "^#HELPME_" | sed -e "s/#//" | tr -s '\t' 1>&2
+		grep '#@' /proc/$$/fd/255 \
+			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
+			| grep -v "^#@ HELP_" \
+			| sed "
+				s/^#@//;
+				s/) #@ =/=/;
+				s/) #@ /\n\t\t/;
+				s/\t#@ /\t/;
+				s/ \+/ /;
+				s/^\t\t/\t/;
+				s/^ //" \
+			| sed "
+				s/\t/    /g;
+				s/ | /, /"
 	fi
-	kill 0
+	Pgid=$(ps -o pgid= $$ | tr -d " ")
+	[ $(cat /proc/$Pgid/task/$Pgid/children | wc -w) -lt 2 ] \
+		&& exit 1 \
+		|| kill 0
 }
 
 function readable_time {
@@ -44,7 +60,7 @@ function report_then_quit {
 		echo '{ "version":"1.1", "alerts": {'
 	elif [ "$Report" != "TXT" ]
 	then
-		helpme "ERR-103: unsupported report format"
+		die "ERR-103: unsupported report format"
 	fi
 	! ((Row=0))
 	! ((Ok=0))
@@ -69,7 +85,8 @@ function report_then_quit {
 			[ $Row -eq 0 ] || echo ","
 			Since=$(date -u -Iseconds -d @$(stat -c %Y ${F::-11}/diff-previous))
 			Diff=$(base64 -w 0 $(echo $F | sed -e 's/-count$/-current/') )
-			echo -e "\"$Task\": {\"since\":\"$Since\", \"count\":$Cnt, \"exit\":$Exit, \"diff\":\"$Diff\"}"
+			echo -e "\"$Task\": {\"since\":\"$Since\", \"count\":$Cnt, " \
+				"\"exit\":$Exit, \"diff\":\"$Diff\"}"
 		fi
 		((Row+=1))
 	done < <(find . -type f -name diff-count | sort)
@@ -92,29 +109,31 @@ eval set -- "$Opts"
 while [ $# -gt 0 ]
 do
 	case "$1" in
-#HELPME_START
-#SYNOPSIS
-#	dm-check [OPTION]...
-#EXAMPLE
-#	cd /opt/daimon/var; dm-check
-#DESCRIPTION
-		-h | --help)	#print help information
-			helpme ;;
-		--version)	#print version
-			helpme 20221122 ;;
-		-v )	#verbose output
+#@ HELP_START
+#@ SYNOPSIS
+#@	dm-check [OPTION]...
+#@ EXAMPLE
+#@	dm-check -ar
+#@	dm-check -a
+#@ DESCRIPTION
+		-h | --help) #@ Display this help message and exit.
+			die ;;
+		--version) #@ Display version information and exit.
+			die 20260109 ;;
+		-v ) #@ Enable verbose output.
 			set -x
 			shift ;;
-		-a | --all)	#check all tasks, regardless of current directory
+		-a | --all) #@ Check all tasks, regardless of the current directory.
 			All=YES
 			shift ;;
-		-r | --report)	#print report with tab-delimited format
+		-r | --report) #@ Print the report in tab-delimited format.
 			Report=TXT
 			shift ;;
-		-j | --json-report)	#print report with json format
+		-j | --json-report) #@ Print the report in json format.
 			Report=JSON
 			shift ;;
-		-i | --ignore--exitcode)	#ignore out-exitcode to override the standard file
+		-i | --ignore--exitcode) #@ Ignore the exit code and override the
+			#@ standard status file.
 			Ignore=YES
 			shift ;;
 		--)
@@ -122,27 +141,31 @@ do
 			break ;;
 		*)
 			break ;;
-#AUTHOR
-#	Manhong Dai, MNI, U of Michigan
-#COPYRIGHT
-#	Copyright © 2002-2023 University of Michigan. MIT License
-#HELPME_END
+#@ AUTHOR
+#@	Manhong Dai, MNI, U of Michigan
+#@ COPYRIGHT
+#@	Copyright © 2002-2026 University of Michigan. MIT License
+#HELP_END
 	esac
 done
 DaimonConf=/etc/daimon.conf
-. $DaimonConf || helpme "ERR-100: Configuration file $DaimonConf is missing"
-[ -n "$DaimonVar" ] || helpme "ERR-101: DaimonVar is not defined in the configuration file $DaimonConf"
+. $DaimonConf || die "ERR-100: Configuration file $DaimonConf is missing"
+[ -n "$DaimonVar" ] \
+	|| die "ERR-101: DaimonVar is not in the configuration file $DaimonConf"
 if [ "$All" = "YES" ]
 then
 	cd $DaimonVar
 elif [[ $PWD != $DaimonVar* ]]
 then
-	helpme "ERR-102: cd to any directory under $DaimonVar at first, or use '-a'"
+	die "ERR-102: cd to any directory under $DaimonVar at first, or use '-a'"
 fi
 CutFrom=$(echo $DaimonVar/ | wc -c)
 [ "$Report" = "NO" ] || report_then_quit $CutFrom
-for f in $(find . -type d | sort)
+Tasks=($(find . -type d | sort))
+Step=1
+for ((i=0; i>=0 && i<${#Tasks[@]}; i+=$Step))
 do
+	f=${Tasks[$i]}
 	[ -f $f/lock ] || continue
 	[ -f $f/diff-count ] || continue
 	! diff -q $f/diff-count <(echo 0) > /dev/null || continue
@@ -160,22 +183,32 @@ do
 	do
 		clear
 		Tempfile=$(mktemp)
-		if ! Md5sum=$(flock -xn $f/lock bash -c "md5sum $f/out-current; diff --color=always $f/out-current $Standard > $Tempfile; :")
+		if ! Md5sum=$(flock -xn $f/lock bash -c "md5sum $f/out-current; \
+			diff --color=always $f/out-current $Standard > $Tempfile || :")
 		then
-			read -n 1 -r -p "$Task: is locked by another process. Next[q] or any key to retry? " Ans
+			read -n 1 -r -p "$Task: is locked by another process. [b]ack, \
+next[q] or any key to retry? " Ans
 			case "$Ans" in
+				B|b )
+					((Step=-1))
+					break;;
 				Q|q )
+					((Step=1))
 					break;;
 				* )
 					continue;;
 			esac
 		fi
 		set +eE
-		GREP_COLORS='ms=07;31:mc=01;31:sl=:cx=:fn=35:ln=32:bn=32:se=36' grep --color=always -e ^ -e "CRITICAL:.*" $Tempfile | less -RKFXP "$Task"
+		GREP_COLORS='ms=07;31:mc=01;31:sl=:cx=:fn=35:ln=32:bn=32:se=36' \
+			grep --color=always -e ^ -e "CRITICAL:.*" $Tempfile \
+			| less -RKFXP "$Task"
 		set -eE
 		rm $Tempfile
-		[ "$Ignore" = "YES" ] || [ -z "$Admin" ] || diff -q <(echo 0) $f/out-exitcode &> /dev/null || Admin=""
-		read -n 1 -r -p "$Task: $(readable_time $f/diff-previous) ago, $(cat $f/diff-count) times. Next[q]$Admin? " Ans
+		Exit=$(cat $f/out-exitcode)
+		[ "$Ignore" = "YES" ] || [ -z "$Admin" ] || [ "$Exit" = 0 ] || Admin=""
+		read -n 1 -r -p "$Task: exit $Exit, $(readable_time $f/diff-previous) \
+ago, $(cat $f/diff-count) times. [b]ack, next[q]$Admin?" Ans
 		echo
 		case "$Ans" in
 			A|a|O|o )
@@ -198,11 +231,13 @@ do
 						cp $f/out-current $f/out-standard.$i
 					fi
 					echo 0 > $f/diff-count
-				) 99> $f/lock && break || continue
-				;;
+				) 99> $f/lock && break || continue ;;
+			B|b )
+				((Step=-1))
+				break ;;
 			Q|q )
-				break
-				;;
+				((Step=1))
+				break ;;
 		esac
 	done
 	echo
