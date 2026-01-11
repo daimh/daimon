@@ -119,7 +119,7 @@ class DfCheck(Task):
                 cmd = f"{df_cmd} -t {mp}"
             else:
                 cmd = f"mountpoint -q {mp} && {df_cmd} {mp}"
-            self.cmds.append(f"{cmd} | tail -n +2 | grep -v /run/user")
+            self.cmds.append(f"{cmd} | sed 1d | sort -k6")
 
     def getln(self, ln):
         fs = ln.split()
