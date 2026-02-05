@@ -18,7 +18,7 @@ def get_args():
         "-p", "--port", type=int, help="Port number of the linux target"
     )
     parser.add_argument(
-        "-V", "--version", action="version", version="20260110"
+        "-V", "--version", action="version", version="20260204"
     )
     for cls in Task.__subclasses__():
         add_class_to_parser(cls, parser)
@@ -110,13 +110,14 @@ class DfCheck(Task):
             err_exit("ERR-109: wrong operand for --dfcheck")
         self.threshold = int(self.threshold[:-1])
         df_cmd = "df -h --output=fstype,size,used,avail,pcent,target"
+        exclude = "grep -v /run/user/"
         for mp in mountpoints.split(","):
             if mp == "":
-                cmd = df_cmd
+                cmd = f"{df_cmd} | {exclude}"
             elif mp == "LOCAL":
-                cmd = f"{df_cmd} -l"
+                cmd = f"{df_cmd} -l | {exclude}"
             elif not mp.startswith("/"):
-                cmd = f"{df_cmd} -t {mp}"
+                cmd = f"{df_cmd} -t {mp} | {exclude}"
             else:
                 cmd = f"mountpoint -q {mp} && {df_cmd} {mp}"
             self.cmds.append(f"{cmd} | sed 1d | sort -k6")
