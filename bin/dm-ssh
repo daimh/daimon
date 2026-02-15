@@ -2,16 +2,30 @@
 set -Eeufo pipefail
 trap "exit 1" TERM
 function die {
+	# 20251225
 	if [ $# -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
-		grep '#' /proc/$$/fd/255 \
+		grep '#@' /proc/$$/fd/255 \
 			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
 			| grep -v "^#@ HELP_" \
-			| sed "s/#@//; s/ \+/ /; s/\t\+/\t/; s/^ //" 
+			| sed "
+				s/^#@//;
+				s/) #@ =/=/;
+				s/) #@ /\n\t\t/;
+				s/\t#@ /\t/;
+				s/ \+/ /;
+				s/^\t\t/\t/;
+				s/^ //" \
+			| sed "
+				s/\t/    /g;
+				s/ | /, /"
 	fi
-	kill 0
+	Pgid=$(ps -o pgid= $$ | tr -d " ")
+	[ $(cat /proc/$Pgid/task/$Pgid/children | wc -w) -lt 2 ] \
+		&& exit 1 \
+		|| kill 0
 }
 
 function cleanme {
@@ -38,11 +52,13 @@ function get_set_list {
 			Word="${Word:1}"
 			get_set_list $Word Sublist
 			Expanded+=($Sublist)
-		elif [[ $Word =~ ^([[:alnum:]][-.[:alnum:]]*)\[([[0-9]+[-,[0-9]+]*)\]([-.[:alnum:]]*)$ ]]
+		elif [[ $Word =~ \
+^([[:alnum:]][-.[:alnum:]]*)\[([[0-9]+[-,[0-9]+]*)\]([-.[:alnum:]]*)$
+		]]
 		then
 			Prefix=${BASH_REMATCH[1]}
 			Suffix=${BASH_REMATCH[3]}
-			for Comma in ${BASH_REMATCH[2]//,/ } 
+			for Comma in ${BASH_REMATCH[2]//,/ }
 			do
 				if [[ $Comma =~ ^([0-9]+)-([0-9]+)$ ]]
 				then
@@ -54,12 +70,12 @@ function get_set_list {
 						Expanded+=($Prefix$I$Suffix)
 					done < <( [ ${#From} -eq ${#To} ] \
 						&& seq -w $From $To \
-						|| seq $From $To ) 
+						|| seq $From $To )
 				elif [[ $Comma =~ ^([0-9]+)$ ]]
 				then
 					Expanded+=($Prefix$Comma$Suffix)
 				else
-					die "ERR-017: \"$Comma\" is ia a wrong definition between comma"
+					die "ERR-017: \"$Comma\" is a wrong definition between comma"
 				fi
 			done
 		elif [[ $Word =~ ^[[:alnum:]][-.[:alnum:]]*$ ]]
@@ -80,10 +96,10 @@ DmsshConf=~/.dm-ssh.conf
 if [ ! -f $DmsshConf ]
 then
 	DmsshConf=/etc/dm-ssh.conf
-	[ -f $DmsshConf ] ||
-		die "ERR-001: missing config file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
+	[ -f $DmsshConf ] \
+		|| die "ERR-001: missing file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
 fi
-declare -A SetMap 
+declare -A SetMap
 declare -a ALL
 while read SetName Nodes
 do
@@ -111,8 +127,9 @@ fi
 Basename=$(basename $0)
 Delay=0
 Quiet=No
-OptShort="hvle:E:j:d:q"
-OptLong="help,version,list,exclude-hosts:,exclude-sets:,jobs:,delay:,quiet"
+OptShort="hvlL:e:E:j:d:q"
+OptLong="help,version,list,show:,exclude-hosts:,exclude-sets:,jobs:,delay:,"
+OptLong+="quiet"
 Opts=$(getopt -o $OptShort --long $OptLong -n $Basename -- "$@")
 Job=$(mktemp /tmp/$Basename-XXXX )
 [ -n "$Job" ] || die "ERR-007: failed to create temp file"
@@ -131,7 +148,7 @@ do
 #@ 	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
 #@ EXAMPLE
 #@	# define two sets of hosts
-#@ 	echo -e "set1:\tlocalhost\nset2:\t@set1 127.0.0.[2-10]" | tee ~/.dm-ssh.conf
+#@ 	echo -e "set1:\tlocalhost\nset2:\t@set1 127.0.0.[2-10]" > ~/.dm-ssh.conf
 #@
 #@ 	dm-ssh set1 hostname
 #@ 	dm-ssh -e localhost root@set2 -- df -lh
@@ -141,35 +158,45 @@ do
 #@ 	dm-scp testout set2:/tmp
 #@ 	dm-scp set2:/tmp/testout/file testin
 #@ DESCRIPTION
-		-h |--help)	#@ print help information
+		-h | --help) #@ print help information
 			die ;;
-		--version)	#@ print version
-			die 20250320 ;;
-		-v)	#@ verbose output
+		--version) #@ print version
+			die 20260214 ;;
+		-v) #@ verbose output
 			set -x
 			shift ;;
-		-l |--list)	#@ list all sets and their hosts
-			cat $DmsshConf
+		-l | --list) #@ list all sets and their hosts
+			grep --color=auto ^.*: $DmsshConf
 			echo "$Grn$DmsshConf$Off"
 			cleanme
 			exit ;;
-		-e |--exclude-hosts)	#@ exclude hosts. E.g. host-1,host-2
+		-L | --show) #@ show a set and itshosts
+			grep --color=auto ^$2: $DmsshConf
+			echo "$Grn$DmsshConf$Off"
+			cleanme
+			exit ;;
+		-e | --exclude-hosts) #@ exclude hosts. E.g. host-1,host-2
 			echo $2 | sed "s/,/\n/g" >> $Job-exclude
 			shift 2 ;;
-		-E |--exclude-sets)	#@ excluded host sets. E.g. set1,set2
+		-E | --exclude-sets) #@ excluded host sets. E.g. set1,set2
 			echo $2 | sed "s/,/\n/g" | while read E
 			do
-				grep -q ^$E: $DmsshConf || die "ERR-006: exclude-set '$E' doesn't exist"
-				grep ^$E: $DmsshConf | cut -d '	' -f 2 | sed "s/,/\n/g" >> $Job-exclude
+				grep -q ^$E: $DmsshConf \
+					|| die "ERR-006: exclude-set '$E' doesn't exist"
+				grep ^$E: $DmsshConf | cut -d $'\t' -f 2 | sed "s/,/\n/g" \
+					>> $Job-exclude
 			done
 			shift 2 ;;
-		-j |--jobs)	#@ number of parallel jobs, default 0 means as many as possible
+		-j | --jobs) #@ =[JOBS]
+			#@ number of parallel jobs, default 0 means as many as possible
 			Parallel=$2
 			shift 2 ;;
-		-d |--delay)	#@ NUM, sleep a random fraction of NUM seconds before ssh-ing, default 0
+		-d | --delay) #@ =[NUM]
+			#@ sleep a random fraction of NUM seconds before issuing ssh, 
+			#@ default 0
 			((Delay=$2))
 			shift 2 ;;
-		-q |--quiet)	#@ quiet
+		-q | --quiet) #@ quiet
 			Quiet=Yes
 			shift ;;
 		--)
@@ -180,11 +207,10 @@ do
 #@ AUTHOR
 #@ 	Manhong Dai, MNI, U of Michigan
 #@ COPYRIGHT
-#@ 	Copyright © 2002-2023 University of Michigan. MIT License
+#@ 	Copyright © 2002-2026 University of Michigan. MIT License
 #@ HELP_END
 	esac
 done
-
 
 command -v parallel &> /dev/null || die "ERR-004: missing command 'parallel'"
 [ $# -gt 1 ] || die "ERR-002: use -h/--help"
@@ -228,19 +254,6 @@ case "${#Arr[@]}" in
 	*)
 		die "ERR-009: set name can have up to one @";;
 esac
-#if [ "$Basename" = "dm-scp" ]
-#then
-#	Arr=(${Sets//:/ })
-#	Sets=${Arr[0]}
-#	case "${#Arr[@]}" in
-#		1)
-#			Dir="";;
-#		2)
-#			Dir=${Arr[1]} ;;
-#		*)
-#			die "ERR-011: dm-scp TARGET name can only have one :";;
-#	esac
-#fi
 Sets=(${Sets//,/ })
 rm -f $Job-sets
 for SetName in ${Sets[@]}
@@ -257,7 +270,9 @@ set +e
 if [ "$(join -v 2 $Job-nodes $Job-exclude | wc -l )" != "0" ]
 then
 	join -v 2 $Job-nodes $Job-exclude
-	read -n 1 -r -p "The hosts above are excluded, but they are not in the specified sets, you might want to fix your -e/E. continue? [y/N]" yn
+	Prompt="The hosts above are excluded, but they are not in the "
+	Prompt+="specified sets, you might want to fix your -e/E. continue? [y/N]"
+	read -n 1 -r -p "$Prompt" yn
 	case "$yn" in
 		Y | y)
 			echo ;;
@@ -287,7 +302,9 @@ fi
 Total=$(cat $Job-nodes | wc -l)
 [ "$Quiet" = "Yes" ] \
 	|| echo -ne "${Grn}Running:$Off\n1/$Total:\t$(head -n 1 $Job-nodes)"
-SshOpts='-o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p" -o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error -o StrictHostKeyChecking=no -o BatchMode=yes' 
+SshOpts='-o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p" '
+SshOpts+='-o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error '
+SshOpts+='-o StrictHostKeyChecking=no -o BatchMode=yes'
 seq $Total | parallel -k -j $Parallel --colsep '\t' "
 	sleep \$(printf \"0.%03d\n\" \$(($Delay * \$RANDOM * 1000 / 32768)) )
 	Node=\$(sed '{1}q;d' $Job-nodes)
@@ -299,7 +316,8 @@ seq $Total | parallel -k -j $Parallel --colsep '\t' "
 		scp -qpr $SshOpts ${Files[@]} $SshUser@\$Node:$Dir &> $Job-host-\$Node
 	else
 		mkdir -p $Dir/\$Node
-		scp -qpr $SshOpts $SshUser@\$Node:${Files[@]} $Dir/\$Node &> $Job-host-\$Node
+		scp -qpr $SshOpts $SshUser@\$Node:${Files[@]} $Dir/\$Node \
+			&> $Job-host-\$Node
 	fi
 	Rtn=\$?
 	Next=\$(({1}+1))
@@ -315,7 +333,7 @@ seq $Total | parallel -k -j $Parallel --colsep '\t' "
 		fi
 	fi
 	[ -s $Job-host-\$Node ] &&
-		[ \"\$(tail -c 1 $Job-host-\$Node | od -iAn | tr -d ' ' )\" != \"10\" ] &&
+		[ \"\$(tail -c 1 $Job-host-\$Node|od -iAn|tr -d ' ' )\" != \"10\" ] &&
 		echo -e \"\n\" >> $Job-host-\$Node
 	echo \$Rtn >> $Job-host-\$Node
 "
