@@ -119,7 +119,7 @@ do
 		-h | --help) #@ Display this help message and exit.
 			die ;;
 		--version) #@ Display version information and exit.
-			die 20260109 ;;
+			die 20260508 ;;
 		-v ) #@ Enable verbose output.
 			set -x
 			shift ;;
@@ -182,7 +182,8 @@ do
 	while :
 	do
 		clear
-		Tempfile=$(mktemp)
+		Tempfile=$(mktemp /tmp/dm-check-XXXX )
+		trap 'rm -f $Tempfile' EXIT
 		if ! Md5sum=$(flock -xn $f/lock bash -c "md5sum $f/out-current; \
 			diff --color=always $f/out-current $Standard > $Tempfile || :")
 		then

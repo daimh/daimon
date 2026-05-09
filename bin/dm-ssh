@@ -132,6 +132,7 @@ OptLong="help,version,list,show:,exclude-hosts:,exclude-sets:,jobs:,delay:,"
 OptLong+="quiet"
 Opts=$(getopt -o $OptShort --long $OptLong -n $Basename -- "$@")
 Job=$(mktemp /tmp/$Basename-XXXX )
+trap 'rm -f $Job' EXIT
 [ -n "$Job" ] || die "ERR-007: failed to create temp file"
 Parallel=0
 echo -n > $Job-exclude
@@ -161,7 +162,7 @@ do
 		-h | --help) #@ print help information
 			die ;;
 		--version) #@ print version
-			die 20260214 ;;
+			die 20260508 ;;
 		-v) #@ verbose output
 			set -x
 			shift ;;
@@ -192,7 +193,7 @@ do
 			Parallel=$2
 			shift 2 ;;
 		-d | --delay) #@ =[NUM]
-			#@ sleep a random fraction of NUM seconds before issuing ssh, 
+			#@ sleep a random fraction of NUM seconds before issuing ssh,
 			#@ default 0
 			((Delay=$2))
 			shift 2 ;;
