@@ -54,7 +54,7 @@ do
 		-h | --help) #@ Display this help message and exit.
 			die ;;
 		--version) #@ Display version information and exit.
-			die 20241123 ;;
+			die 20260806 ;;
 		-v ) #@ Enable verbose output.
 			set -x
 			shift ;;
@@ -106,7 +106,7 @@ Cmd="$@"
 [ -d "$DaimonVar" ] || die "ERR-104: $DaimonVar is not a directory"
 [ -n "$Task" ] || die "ERR-105: Task is missing"
 Dir=$DaimonVar/$Task
-[ -t 1 ] || sleep $[ $RANDOM%10 ]
+[ -t 1 ] || sleep $(( 10 + $RANDOM%20 ))
 mkdir -p $Dir
 rm -f $Dir/out-current
 [ "$Withhold" != "NO" ] || echo $Args >> $Dir/out-current
@@ -136,6 +136,7 @@ fi
 			die "ERR-106: initialization failed for $Task"
 		fi
 		mv $Dir/out-current $Dir/out-standard
+		echo 0 > $Dir/diff-count
 		cat $Dir/out-standard
 		[ -z "$EmailTo" ] || cat $Dir/out-standard \
 			| mail -s "$Task is initalized successfully. If the command \
