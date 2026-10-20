@@ -11,16 +11,15 @@ function die {
 			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
 			| grep -v "^#@ HELP_" \
 			| sed "
+				s/ | /, /;
+				s/) / /;
 				s/^#@//;
-				s/) #@ =/=/;
-				s/) #@ /\n\t\t/;
-				s/\t#@ /\t/;
-				s/ \+/ /;
-				s/^\t\t/\t/;
-				s/^ //" \
-			| sed "
-				s/\t/    /g;
-				s/ | /, /"
+				s/ #@ =/=/;
+				s/ #@//;
+				s/#@ //;
+				s/^\t\t/    /;
+				s/\t/    /;
+			"
 	fi
 	Pgid=$(ps -o pgid= $$ | tr -d " ")
 	[ $(cat /proc/$Pgid/task/$Pgid/children | wc -w) -lt 2 ] \
@@ -126,9 +125,10 @@ fi
 
 Basename=$(basename $0)
 Delay=0
+SshPass=""
 Quiet=No
-OptShort="hvlL:e:E:j:d:q"
-OptLong="help,version,list,show:,exclude-hosts:,exclude-sets:,jobs:,delay:,"
+OptShort="hvlp:L:e:E:j:d:q"
+OptLong="help,version,list,sshpass:,show:,exclude-hosts:,exclude-sets:,jobs:,delay:,"
 OptLong+="quiet"
 Opts=$(getopt -o $OptShort --long $OptLong -n $Basename -- "$@")
 Job=$(mktemp /tmp/$Basename-XXXX )
@@ -159,27 +159,40 @@ do
 #@ 	dm-scp testout set2:/tmp
 #@ 	dm-scp set2:/tmp/testout/file testin
 #@ DESCRIPTION
-		-h | --help) #@ print help information
+		-h | --help) #@
+			#@ print help information
 			die ;;
-		--version) #@ print version
-			die 20260508 ;;
-		-v) #@ verbose output
+		--version) #@
+			#@ print version information
+			die 20261021 ;;
+		-v) #@
+			#@ enable verbose output
 			set -x
 			shift ;;
-		-l | --list) #@ list all sets and their hosts
+		-l | --list) #@
+			#@ list all sets and their hosts
 			grep --color=auto ^.*: $DmsshConf
 			echo "$Grn$DmsshConf$Off"
 			cleanme
 			exit ;;
-		-L | --show) #@ show a set and itshosts
+		-p | --sshpass) #@ =PASSWORD
+			#@ use PASSWORD as the SSH password via sshpass
+			command -v sshpass > /dev/null \
+				|| die "ERR-020: sshpass command not found"
+			SshPass="sshpass -p $2 "
+			shift 2 ;;
+		-L | --show) #@ =SET
+			#@ show hosts in SET
 			grep --color=auto ^$2: $DmsshConf
 			echo "$Grn$DmsshConf$Off"
 			cleanme
 			exit ;;
-		-e | --exclude-hosts) #@ exclude hosts. E.g. host-1,host-2
+		-e | --exclude-hosts) #@ =HOSTS
+			#@ exclude HOSTS, e.g. host-1,host-2
 			echo $2 | sed "s/,/\n/g" >> $Job-exclude
 			shift 2 ;;
-		-E | --exclude-sets) #@ excluded host sets. E.g. set1,set2
+		-E | --exclude-sets) #@ =SETS
+			#@ excluded SETS, e.g. set1,set2
 			echo $2 | sed "s/,/\n/g" | while read E
 			do
 				grep -q ^$E: $DmsshConf \
@@ -188,16 +201,17 @@ do
 					>> $Job-exclude
 			done
 			shift 2 ;;
-		-j | --jobs) #@ =[JOBS]
-			#@ number of parallel jobs, default 0 means as many as possible
+		-j | --jobs) #@ =JOBS
+			#@ number of parallel jobs; 0 (default) means as many as possible
 			Parallel=$2
 			shift 2 ;;
-		-d | --delay) #@ =[NUM]
-			#@ sleep a random fraction of NUM seconds before issuing ssh,
-			#@ default 0
+		-d | --delay) #@ =NUM
+			#@ sleep for a random fraction of NUM seconds before issuing ssh
+			#@ 0 (default) means no delay
 			((Delay=$2))
 			shift 2 ;;
-		-q | --quiet) #@ quiet
+		-q | --quiet) #@
+			#@ suppress output
 			Quiet=Yes
 			shift ;;
 		--)
@@ -303,21 +317,34 @@ fi
 Total=$(cat $Job-nodes | wc -l)
 [ "$Quiet" = "Yes" ] \
 	|| echo -ne "${Grn}Running:$Off\n1/$Total:\t$(head -n 1 $Job-nodes)"
-SshOpts='-o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p" '
-SshOpts+='-o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error '
-SshOpts+='-o StrictHostKeyChecking=no -o BatchMode=yes'
+DmSshScp=$SshPass
+if [ $Basename = dm-ssh ]
+then
+	DmSshScp+=ssh
+else
+	DmSshScp+="scp -qpr"
+fi
+if [ -n "$SshPass" ]
+then
+	DmSshScp+=' -o PubkeyAuthentication=no -o PreferredAuthentications=password'
+else
+	DmSshScp+=' -o BatchMode=yes'
+fi
+DmSshScp+=' -o ControlMaster=auto -o ControlPath="~/.ssh/dm-ssh-%r@%n-%p"'
+DmSshScp+=' -o ControlPersist=60 -o ConnectTimeout=2 -o LogLevel=error'
+DmSshScp+=' -o StrictHostKeyChecking=no'
 seq $Total | parallel -k -j $Parallel --colsep '\t' "
 	sleep \$(printf \"0.%03d\n\" \$(($Delay * \$RANDOM * 1000 / 32768)) )
 	Node=\$(sed '{1}q;d' $Job-nodes)
 	if [ $Basename = dm-ssh ]
 	then
-		ssh $SshOpts $SshUser@\$Node <<< \"$Cmd\" &> $Job-host-\$Node
+		$DmSshScp $SshUser@\$Node <<< \"$Cmd\" &> $Job-host-\$Node
 	elif [ $Cmd = scpout ]
 	then
-		scp -qpr $SshOpts ${Files[@]} $SshUser@\$Node:$Dir &> $Job-host-\$Node
+		$DmSshScp ${Files[@]} $SshUser@\$Node:$Dir &> $Job-host-\$Node
 	else
 		mkdir -p $Dir/\$Node
-		scp -qpr $SshOpts $SshUser@\$Node:${Files[@]} $Dir/\$Node \
+		$DmSshScp $SshUser@\$Node:${Files[@]} $Dir/\$Node \
 			&> $Job-host-\$Node
 	fi
 	Rtn=\$?
