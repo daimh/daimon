@@ -91,27 +91,6 @@ function get_set_list {
 	unset Stack[-1]
 }
 
-DmsshConf=~/.dm-ssh.conf
-if [ ! -f $DmsshConf ]
-then
-	DmsshConf=/etc/dm-ssh.conf
-	[ -f $DmsshConf ] \
-		|| die "ERR-001: missing file ~/.dm-ssh.conf or /etc/dm-ssh.conf"
-fi
-declare -A SetMap
-declare -a ALL
-while read SetName Nodes
-do
-	[[ "$SetName" = *: ]] \
-		|| die "ERR-013: missing : in $DmsshConf"
-	[ "$SetName" != ALL ] \
-		|| die "ERR-014: 'ALL' is reserved keyword in $DmsshConf"
-	SetName=${SetName::-1}
-	SetMap[$SetName]=$Nodes
-	ALL+=(@$SetName)
-done < $DmsshConf
-SetMap[ALL]=${ALL[@]}
-
 if [ -t 1 ]
 then
 	Red="$(tput setaf 1)"
@@ -123,10 +102,18 @@ else
 	Off=""
 fi
 
+DmsshConf=./dm-ssh.conf
+[ -f $DmsshConf ] || DmsshConf=~/.dm-ssh.conf
+[ -f $DmsshConf ] || DmsshConf=/etc/dm-ssh.conf
+[ -f $DmsshConf ] || \
+	die "ERR-001: ./dm-ssh.conf, ~/.dm-ssh.conf or /etc/dm-ssh.conf not found"
+
 Basename=$(basename $0)
 Delay=0
 SshPass=""
 Quiet=No
+ListOnly=No
+ListName=""
 OptShort="hvlp:L:e:E:j:d:q"
 OptLong="help,version,list,sshpass:,show:,exclude-hosts:,exclude-sets:,jobs:,delay:,"
 OptLong+="quiet"
@@ -142,51 +129,47 @@ do
 	case "$1" in
 #@ HELP_START
 #@ NAME
-#@ 	dm-ssh, parallel ssh
-#@ 	dm-scp, parallel scp
+#@	dm-ssh, parallel ssh
+#@	dm-scp, parallel scp
 #@ SYNOPSIS
-#@ 	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
-#@ 	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
+#@	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
+#@	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
 #@ EXAMPLE
 #@	# define two sets of hosts
-#@ 	echo -e "set1:\tlocalhost\nset2:\t@set1 127.0.0.[2-10]" > ~/.dm-ssh.conf
+#@	echo -e "set1:\tlocalhost\nset2:\t@set1 127.0.0.[2-10]" > ~/.dm-ssh.conf
 #@
-#@ 	dm-ssh set1 hostname
-#@ 	dm-ssh -e localhost root@set2 -- df -lh
+#@	dm-ssh set1 hostname
+#@	dm-ssh -e localhost root@set2 -- df -lh
 #@
 #@	mkdir testout testin
-#@ 	date > testout/file
-#@ 	dm-scp testout set2:/tmp
-#@ 	dm-scp set2:/tmp/testout/file testin
+#@	date > testout/file
+#@	dm-scp testout set2:/tmp
+#@	dm-scp set2:/tmp/testout/file testin
 #@ DESCRIPTION
 		-h | --help) #@
 			#@ print help information
 			die ;;
 		--version) #@
 			#@ print version information
-			die 20261021 ;;
+			die 20261023 ;;
 		-v) #@
 			#@ enable verbose output
 			set -x
 			shift ;;
 		-l | --list) #@
 			#@ list all sets and their hosts
-			grep --color=auto ^.*: $DmsshConf
-			echo "$Grn$DmsshConf$Off"
-			cleanme
-			exit ;;
+			ListOnly=Yes
+			shift ;;
+		-L | --show) #@ =SET
+			#@ show hosts in SET
+			ListName=$2
+			shift 2 ;;
 		-p | --sshpass) #@ =PASSWORD
 			#@ use PASSWORD as the SSH password via sshpass
 			command -v sshpass > /dev/null \
 				|| die "ERR-020: sshpass command not found"
 			SshPass="sshpass -p $2 "
 			shift 2 ;;
-		-L | --show) #@ =SET
-			#@ show hosts in SET
-			grep --color=auto ^$2: $DmsshConf
-			echo "$Grn$DmsshConf$Off"
-			cleanme
-			exit ;;
 		-e | --exclude-hosts) #@ =HOSTS
 			#@ exclude HOSTS, e.g. host-1,host-2
 			echo $2 | sed "s/,/\n/g" >> $Job-exclude
@@ -220,12 +203,35 @@ do
 		*)
 			break ;;
 #@ AUTHOR
-#@ 	Manhong Dai, MNI, U of Michigan
+#@	Manhong Dai, MNI, U of Michigan
 #@ COPYRIGHT
-#@ 	Copyright © 2002-2026 University of Michigan. MIT License
+#@	Copyright © 2002-2026 University of Michigan. MIT License
 #@ HELP_END
 	esac
 done
+
+declare -A SetMap
+declare -a ALL
+while read SetName Nodes
+do
+	[ -n "$SetName" ] || continue
+	[[ "$SetName" = *: ]] || die "ERR-013: missing : in $DmsshConf"
+	[ "$SetName" != ALL ] \
+		|| die "ERR-014: 'ALL' is reserved keyword in $DmsshConf"
+	SetName=${SetName::-1}
+	SetMap[$SetName]=$Nodes
+	ALL+=(@$SetName)
+	[ "$ListOnly" = Yes -o "$ListName" = "$SetName" ] \
+		|| continue
+	echo -e "$Grn$SetName:$Off\t$Nodes"
+done < $DmsshConf
+if [ "$ListOnly" = Yes -o "$ListName" = ALL ]
+then
+	echo -e "${Grn}ALL:$Off\t${ALL[@]}"
+	cleanme
+	exit
+fi
+SetMap[ALL]=${ALL[@]}
 
 command -v parallel &> /dev/null || die "ERR-004: missing command 'parallel'"
 [ $# -gt 1 ] || die "ERR-002: use -h/--help"
