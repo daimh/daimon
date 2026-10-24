@@ -2,26 +2,26 @@
 set -Eeufo pipefail
 trap "exit 1" TERM
 function die {
-	# 20251225
-	if [ $# -gt 0 ]
+	# 20261024
+	if [ "$#" -gt 0 ]
 	then
 		echo -e "$1" 1>&2
 	else
 		grep '#@' /proc/$$/fd/255 \
 			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
-			| grep -v "^#@ HELP_" \
-			| sed "
+			| grep -v '^#@ HELP_' \
+			| sed '
 				s/ | /, /;
 				s/) / /;
-				s/^#@//;
+				s/^#@ //;
 				s/ #@ =/=/;
 				s/ #@//;
-				s/#@ //;
+				s/#@//;
 				s/^\t\t/    /;
 				s/\t/    /;
-			"
+			'
 	fi
-	Pgid=$(ps -o pgid= $$ | tr -d " ")
+	Pgid=$(ps -o pgid= $$ | tr -d ' ')
 	[ $(cat /proc/$Pgid/task/$Pgid/children | wc -w) -lt 2 ] \
 		&& exit 1 \
 		|| kill 0
@@ -114,6 +114,7 @@ SshPass=""
 Quiet=No
 ListOnly=No
 ListName=""
+ExcludeSets=""
 OptShort="hvlp:L:e:E:j:d:q"
 OptLong="help,version,list,sshpass:,show:,exclude-hosts:,exclude-sets:,jobs:,delay:,"
 OptLong+="quiet"
@@ -131,27 +132,30 @@ do
 #@ NAME
 #@	dm-ssh, parallel ssh
 #@	dm-scp, parallel scp
+#@
 #@ SYNOPSIS
 #@	dm-ssh [OPTION]... [[USER@]SET] -- [CMD [ARGS]]
 #@	dm-scp [OPTION]... [FILE]... [[USER@]SET]:[DIR]
+#@
 #@ EXAMPLE
 #@	# define two sets of hosts
 #@	echo -e "set1:\tlocalhost\nset2:\t@set1 127.0.0.[2-10]" > ~/.dm-ssh.conf
-#@
-#@	dm-ssh set1 hostname
+#@	# dm-ssh
+#@	dm-ssh set1 -- hostname
 #@	dm-ssh -e localhost root@set2 -- df -lh
-#@
+#@	# dm-scp
 #@	mkdir testout testin
 #@	date > testout/file
 #@	dm-scp testout set2:/tmp
 #@	dm-scp set2:/tmp/testout/file testin
+#@
 #@ DESCRIPTION
 		-h | --help) #@
 			#@ print help information
 			die ;;
 		--version) #@
 			#@ print version information
-			die 20261023 ;;
+			die 20261024 ;;
 		-v) #@
 			#@ enable verbose output
 			set -x
@@ -176,13 +180,7 @@ do
 			shift 2 ;;
 		-E | --exclude-sets) #@ =SETS
 			#@ excluded SETS, e.g. set1,set2
-			echo $2 | sed "s/,/\n/g" | while read E
-			do
-				grep -q ^$E: $DmsshConf \
-					|| die "ERR-006: exclude-set '$E' doesn't exist"
-				grep ^$E: $DmsshConf | cut -d $'\t' -f 2 | sed "s/,/\n/g" \
-					>> $Job-exclude
-			done
+			ExcludeSets="$2"
 			shift 2 ;;
 		-j | --jobs) #@ =JOBS
 			#@ number of parallel jobs; 0 (default) means as many as possible
@@ -202,8 +200,9 @@ do
 			break ;;
 		*)
 			break ;;
+#@
 #@ AUTHOR
-#@	Manhong Dai, MNI, U of Michigan
+#@	Manhong Dai
 #@ COPYRIGHT
 #@	Copyright © 2002-2026 University of Michigan. MIT License
 #@ HELP_END
@@ -224,7 +223,7 @@ do
 	[ "$ListOnly" = Yes -o "$ListName" = "$SetName" ] \
 		|| continue
 	echo -e "$Grn$SetName:$Off\t$Nodes"
-done < $DmsshConf
+done < <(grep -v ^# $DmsshConf)
 if [ "$ListOnly" = Yes -o "$ListName" = ALL ]
 then
 	echo -e "${Grn}ALL:$Off\t${ALL[@]}"
@@ -285,12 +284,21 @@ do
 done
 [ -s "$Job-sets" ] || die "ERR-003: missing Sets"
 sed "s/ /\n/g" < $Job-sets | sort -u > $Job-nodes
+
+[ -z "$ExcludeSets" ] || echo $ExcludeSets | sed "s/,/\n/g" | while read SetName
+do
+	get_set_list $SetName SetNodes
+	echo $SetNodes | sed "s/ /\n/g" >> $Job-exclude
+done
 sort -u $Job-exclude > $Job-temp
 mv $Job-temp $Job-exclude
 set +e
 if [ "$(join -v 2 $Job-nodes $Job-exclude | wc -l )" != "0" ]
 then
+set -x
 	join -v 2 $Job-nodes $Job-exclude
+grep ^ $Job-nodes $Job-exclude
+
 	Prompt="The hosts above are excluded, but they are not in the "
 	Prompt+="specified sets, you might want to fix your -e/E. continue? [y/N]"
 	read -n 1 -r -p "$Prompt" yn
@@ -308,7 +316,7 @@ fi
 join -v 1 $Job-nodes $Job-exclude > $Job-temp
 mv $Job-temp $Job-nodes
 [ "$( cat $Job-nodes | wc -l )" != "0" ] \
-	|| die "ERR-012: no such nodes"
+	|| die "ERR-012: node list is empty"
 MaxWidth=$(cat $Job-nodes | wc -L)
 [ "$MaxWidth" -gt 4 ] || MaxWidth=4
 ((MaxWidth+=4))
