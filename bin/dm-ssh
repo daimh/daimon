@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeufo pipefail
 trap "exit 1" TERM
-function die {
-	# 20261024
+die() {
+	# 20261115
 	if [ "$#" -gt 0 ]
 	then
-		echo -e "$1" 1>&2
+		echo -e "$@" 1>&2
 	else
 		grep '#@' /proc/$$/fd/255 \
 			| sed -n '/^#@ HELP_START/,/^#@ HELP_END/p' \
@@ -27,14 +27,14 @@ function die {
 		|| kill 0
 }
 
-function cleanme {
-	set +u
+cleanme() {
+	set +uf
 	[ -z "$Job" ] || rm -f $Job $Job-*
-	set -u
+	set -uf
 }
 
 Stack=()
-function get_set_list {
+get_set_list() {
 	local SetName=$1
 	[[ ! " ${Stack[@]} " =~ " $SetName " ]] \
 		|| die "ERR-015: sets are defined in a loop"
@@ -120,7 +120,7 @@ OptLong="help,version,list,sshpass:,show:,exclude-hosts:,exclude-sets:,jobs:,del
 OptLong+="quiet"
 Opts=$(getopt -o $OptShort --long $OptLong -n $Basename -- "$@")
 Job=$(mktemp /tmp/$Basename-XXXX )
-trap 'rm -f $Job' EXIT
+trap cleanme EXIT
 [ -n "$Job" ] || die "ERR-007: failed to create temp file"
 Parallel=0
 echo -n > $Job-exclude
@@ -155,7 +155,7 @@ do
 			die ;;
 		--version) #@
 			#@ print version information
-			die 20261024 ;;
+			die 20261115 ;;
 		-v) #@
 			#@ enable verbose output
 			set -x
@@ -189,7 +189,7 @@ do
 		-d | --delay) #@ =NUM
 			#@ sleep for a random fraction of NUM seconds before issuing ssh
 			#@ 0 (default) means no delay
-			((Delay=$2))
+			((Delay=$2)) || :
 			shift 2 ;;
 		-q | --quiet) #@
 			#@ suppress output
@@ -224,10 +224,11 @@ do
 		|| continue
 	echo -e "$Grn$SetName:$Off\t$Nodes"
 done < <(grep -v ^# $DmsshConf)
-if [ "$ListOnly" = Yes -o "$ListName" = ALL ]
+if [ "$ListOnly" = Yes -o -n "$ListName" ]
 then
-	echo -e "${Grn}ALL:$Off\t${ALL[@]}"
-	cleanme
+	[ "$ListOnly" = Yes -o "$ListName" = ALL ] \
+		&& echo -e "${Grn}ALL:$Off\t${ALL[@]}"
+	[ "$ListOnly" != Yes ] || echo "${Grn}$DmsshConf$Off"
 	exit
 fi
 SetMap[ALL]=${ALL[@]}
@@ -244,6 +245,9 @@ elif [ "$Basename" = "dm-scp" ]
 then
 	if [[ $1 =~ ^([[:alnum:]]*@?[-[:alnum:]]*):(.+) ]]
 	then
+		[ $# -eq 2 ] \
+			|| die "ERR-006: Exactly two arguments are required when" \
+				"copying files to the local machine."
 		Cmd=scpin
 		Sets=${BASH_REMATCH[1]}
 		Files=("${BASH_REMATCH[2]}")
@@ -293,12 +297,9 @@ done
 sort -u $Job-exclude > $Job-temp
 mv $Job-temp $Job-exclude
 set +e
-if [ "$(join -v 2 $Job-nodes $Job-exclude | wc -l )" != "0" ]
+if [ "$(join -v 2 $Job-nodes $Job-exclude | tee $Job-temp | wc -l )" != "0" ]
 then
-set -x
-	join -v 2 $Job-nodes $Job-exclude
-grep ^ $Job-nodes $Job-exclude
-
+	cat $Job-temp
 	Prompt="The hosts above are excluded, but they are not in the "
 	Prompt+="specified sets, you might want to fix your -e/E. continue? [y/N]"
 	read -n 1 -r -p "$Prompt" yn
@@ -307,7 +308,6 @@ grep ^ $Job-nodes $Job-exclude
 			echo ;;
 		N | n)
 			echo
-			cleanme
 			exit 1 ;;
 		*)
 			die "Please answer y or n!";;
@@ -323,7 +323,6 @@ MaxWidth=$(cat $Job-nodes | wc -L)
 if [ -t 1 ]
 then
 	TailWidth=$(($(tput cols) - $MaxWidth))
-	tabs $MaxWidth
 else
 	TailWidth=80
 	Quiet=Yes
@@ -355,10 +354,10 @@ seq $Total | parallel -k -j $Parallel --colsep '\t' "
 		$DmSshScp $SshUser@\$Node <<< \"$Cmd\" &> $Job-host-\$Node
 	elif [ $Cmd = scpout ]
 	then
-		$DmSshScp ${Files[@]} $SshUser@\$Node:$Dir &> $Job-host-\$Node
+		$DmSshScp "${Files[@]}" "$SshUser@\$Node:$Dir" &> $Job-host-\$Node
 	else
-		mkdir -p $Dir/\$Node
-		$DmSshScp $SshUser@\$Node:${Files[@]} $Dir/\$Node \
+		mkdir -p "$Dir/\$Node"
+		$DmSshScp "$SshUser@\$Node:${Files[@]}" "$Dir/\$Node" \
 			&> $Job-host-\$Node
 	fi
 	Rtn=\$?
@@ -382,19 +381,46 @@ seq $Total | parallel -k -j $Parallel --colsep '\t' "
 [ "$Quiet" = "Yes" ] || echo "${Grn}Output:$Off"
 set +f
 TailLines=1
-while read -r C L
+LineNumWidth=$(wc --total=never -l $Job-host-* \
+	| sed "s/^ *//" \
+	| cut -d' ' -f 1 \
+	| wc -L
+)
+for F in $Job-host-*
+do
+	head -n -1 $F | nl -ba -w1
+done | sort -n | uniq -c | sed "s/^ \+//" > $Job-common
+LabelWidth=6 # COMMON
+LineCommon=$(wc -l < $Job-common)
+for F in $Job-host-*
+do
+	(( $(wc -l < $F) != LineCommon + 1 )) || continue
+	for F in $Job-host-*
+	do
+		Node=${F##*-host-}
+		Rtn=$(tail -n 1 $F)
+		NodePrefixLen=$((${#Rtn} + ${#Node} + 1))
+		(( LabelWidth = LabelWidth > NodePrefixLen ? LabelWidth : NodePrefixLen ))
+	done
+	break
+done
+
+while read -r C CommonLine
 do
 	[ "$C" = "$Total" ] || break
 	((TailLines++))
-	echo "LINE:$L"
-done < <(for F in $Job-host-*
-	do
-		head -n -1 $F | nl -ba -w1
-	done | sort -n | uniq -c | sed "s/^ \+//")
+	IFS=$'\t' read -r LN LS <<< "$CommonLine"
+	printf "%-*s: %*s: %s\n" \
+		$LabelWidth COMMON \
+		$LineNumWidth $LN \
+		"$LS"
+done < $Job-common
+
 FailedHosts=()
 SucceededHosts=()
 for F in $Job-host-*
 do
+	Node=${F##*-host-}
 	Rtn=$(tail -n 1 $F)
 	if [ -z "$Rtn" ]
 	then
@@ -405,17 +431,22 @@ do
 	else
 		let Rtn=166
 	fi
-	Node="$(echo $F | sed 's/.*-host-//' )"
 	if [ $Rtn = 0 ]
 	then
 		SucceededHosts+=( $Node )
 	else
 		FailedHosts+=( $Node )
 	fi
-	tail -n +$TailLines $F | head -n -1 | sed "s/^/$Rtn:$Node:\t/"
+	nl -ba -w1 $F \
+		| sed -n "${TailLines},\$ { \$d; p; }" \
+		| while IFS=$'\t' read -r LN LS 
+		do
+			printf "%-*s: %*s: %s\n" \
+				$LabelWidth "$Rtn.$Node" \
+				$LineNumWidth $LN \
+				"$LS"
+		done
 done
-set -f
-cleanme
 if [ "$Quiet" != "Yes" -a ${#SucceededHosts[@]} -gt 0 ]
 then
 	echo "${Grn}OK:$Off"
@@ -425,7 +456,5 @@ if [ ${#FailedHosts[@]} -gt 0 ]
 then
 	echo "${Red}Error:$Off"
 	echo -e "${#FailedHosts[@]}/$Total:\t${FailedHosts[*]}"
-	[ ! -t 1 ] || tabs 8
 	exit 166
 fi
-[ ! -t 1 ] || tabs 8

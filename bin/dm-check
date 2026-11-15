@@ -209,7 +209,7 @@ next[q] or any key to retry? " Ans
 		Exit=$(cat $f/out-exitcode)
 		[ "$Ignore" = "YES" ] || [ -z "$Admin" ] || [ "$Exit" = 0 ] || Admin=""
 		read -n 1 -r -p "$Task: exit $Exit, $(readable_time $f/diff-previous) \
-ago, $(cat $f/diff-count) times. [b]ack, next[q]$Admin?" Ans
+ago, $(cat $f/diff-count) times. [b]ack, next[q]$Admin? " Ans
 		echo
 		case "$Ans" in
 			A|a|O|o )
