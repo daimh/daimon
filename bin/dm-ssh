@@ -95,10 +95,12 @@ if [ -t 1 ]
 then
 	Red="$(tput setaf 1)"
 	Grn="$(tput setaf 2)"
+	Dim="$(tput dim)"
 	Off="$(tput sgr0)"
 else
 	Red=""
 	Grn=""
+	Dim=""
 	Off=""
 fi
 
@@ -155,7 +157,7 @@ do
 			die ;;
 		--version) #@
 			#@ print version information
-			die 20261115 ;;
+			die 20261122 ;;
 		-v) #@
 			#@ enable verbose output
 			set -x
@@ -400,7 +402,8 @@ do
 		Node=${F##*-host-}
 		Rtn=$(tail -n 1 $F)
 		NodePrefixLen=$((${#Rtn} + ${#Node} + 1))
-		(( LabelWidth = LabelWidth > NodePrefixLen ? LabelWidth : NodePrefixLen ))
+		(( LabelWidth = LabelWidth > NodePrefixLen ? 
+			LabelWidth : NodePrefixLen ))
 	done
 	break
 done
@@ -410,7 +413,7 @@ do
 	[ "$C" = "$Total" ] || break
 	((TailLines++))
 	IFS=$'\t' read -r LN LS <<< "$CommonLine"
-	printf "%-*s: %*s: %s\n" \
+	printf "$Dim%-*s: %*s:$Off %s\n" \
 		$LabelWidth COMMON \
 		$LineNumWidth $LN \
 		"$LS"
@@ -441,7 +444,7 @@ do
 		| sed -n "${TailLines},\$ { \$d; p; }" \
 		| while IFS=$'\t' read -r LN LS 
 		do
-			printf "%-*s: %*s: %s\n" \
+			printf "$Dim%-*s: %*s:$Off %s\n" \
 				$LabelWidth "$Rtn.$Node" \
 				$LineNumWidth $LN \
 				"$LS"
